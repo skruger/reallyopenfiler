@@ -1,0 +1,127 @@
+<?php
+
+define("TINKER_HTTP_GET", 0);
+define("TINKER_HTTP_POST", 1);
+
+define("TINKER_INHERIT", -1);
+define("TINKER_HTTP", 0);
+define("TINKER_HTTPS", 1);
+
+if (isset($_SERVER["HTTPS"]) && $_SERVER["HTTPS"]) {
+    $GLOBALS["http_secure"] = true;
+    $GLOBALS["http_url_scheme"] = "https";
+}
+else {
+    $GLOBALS["http_secure"] = false;
+    $GLOBALS["http_url_scheme"] = "http";
+}
+
+
+
+
+$prefix = "/opt/openfiler/var/www";
+$include_path = $prefix . "/includes";
+require("$include_path/ajax.inc");
+
+function xhtml_javascript_begin() {
+?>
+
+<script type="text/javascript">
+<!--/*--><![CDATA[<!--*/
+
+<?php
+}
+
+
+function xhtml_javascript_end() {
+?>
+
+/*]]>*/ // -->
+</script>
+
+<?php
+}
+
+
+$ajax = new tinkerAjax();
+$ajax->registerFunction($PHP_SELF, "getUptime");
+
+function getUptime() {
+
+    $objResponse = new tinkerAjaxResponse();
+    $handle = popen("/usr/bin/sudo /usr/bin/uptime", "r");
+    $data = fread($handle, 4096);
+    $uptime = trim($data);
+    pclose($handle);
+
+    /* update via ajax */
+
+
+    $objResponse->addRemove("uptimeData");
+    $objResponse->addAppend("uptimeDiv", "innerHTML", "<span id=\"uptimeData\">$uptime</span>");
+    return $objResponse->getXML();
+
+}
+
+
+    $ajax->processRequests();
+
+
+
+     ob_start();
+
+    // work around problems with the PHP parser
+    print("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n");
+    print("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n");
+    print("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
+    print("<head>\n");
+    xhtml_javascript_begin();
+    $ajax->generateJavaScript();
+    xhtml_javascript_end();
+
+    print("<script language=\"JavaScript\" type=\"text/javascript\">\n");
+    print("var t;\n");
+    print("function getSysUptime() {\n");
+    print("tinker_getUptime();\n");
+    print("t = setTimeout(\"getSysUptime()\", 5000)\n");
+    print("}\n</script>\n");
+    
+    ?>
+
+
+    <?php
+
+    print("<style type=\"text/css\">\n");
+    print("div.uptimeDiv {
+
+        background-color: #5b6469;
+        height: 25px;
+        margin-top: 10px;
+        margin-bottom: 5px;
+        padding-left: 35px;
+        padding-right: 15px;
+        line-height: 25px; 
+        font-family: Verdana, Helvetica;
+        font-size: 11px;
+        width: 500px;
+        color: white;
+        margin-right: 2px;
+        text-align: left;
+
+
+    }");
+    print("</style>");
+
+    print("</head>\n");
+    print("<body bgcolor=\"#4c555a\" style=\"margin: 0; padding: 0\" onload=\"getSysUptime()\">\n");
+    print("\n");
+    print("<div id=\"uptimeDiv\" class=\"uptimeDiv\"><span style=\"line-height: 10px;\" id=\"uptimeData\"></span> </div>");
+    print("</body>\n");
+    print("</html>\n");
+    $output_content = ob_get_contents();
+    $output_length = ob_get_length();
+    ob_end_clean();
+    header("Content-length: " . $output_length);
+    print($output_content);
+
+?>

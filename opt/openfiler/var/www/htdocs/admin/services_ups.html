@@ -1,0 +1,105 @@
+<?php
+
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+        require ("pre.inc");
+        include("authenticated.inc");
+
+
+
+		generic_header(array ("title" => _("Services : UPS Setup"), "ajax" => $ajax));
+		single_begin(array ());
+		?>
+
+                <p>&nbsp;</p>
+		<?php
+
+		nested_tab_begin("C_SERVICES_UPS");
+		print ("<h3 align=\"center\">UPS Settings</h3>\n");
+
+		print ("<div align=\"center\">\n");
+		print ("<table><tr><td>\n");
+		print ("<h4>Administrative Tasks</h4>\n");
+		print ("<ol>\n");
+		print ("<li><a href=\"#\" onclick=\"tinker_buildServiceModeForm(); Effect.BlindDown('configdiv'); return false;\">Configure Service Mode (Client/Server)</a></li>\n");
+		print ("<li><a href=\"#\" onclick=\"tinker_buildACLConfigForm(); Effect.BlindDown('configdiv'); return false;\">Configure Access Control</a></li>\n");
+		print ("<li><a href=\"#\" onclick=\"tinker_buildUserManagerForm(); Effect.BlindDown('configdiv');  return false;\">Add UPSD User</a></li>\n");
+		print ("<li><a href=\"#\" onclick=\"tinker_deleteUPSDUserForm(); Effect.BlindDown('configdiv');  return false;\">Delete UPSD User</a></li>\n");
+		print ("<li><a href=\"#\" onclick=\"tinker_buildLocalUPSMonForm(); Effect.BlindDown('configdiv');  return false;\">Add UPS System Monitoring Entry</a></li>\n");
+		print ("<li><a href=\"#\" onclick=\"tinker_deleteLocalUPSMonForm(); Effect.BlindDown('configdiv');  return false;\">Delete UPS System Monitoring Entry</a></li>\n");
+		print ("</ol>");
+		print ("</td></tr></table>\n");
+		print ("</div>\n");
+
+		print ("<div id=\"configdiv\" style=\"display:none;\">\n");
+		print ("<div id=\"innerdiv\"></div>");
+		print ("</div>");
+		nested_tab_end();
+		?>
+
+			<script type="text/javascript">
+
+
+			function blindUp()
+			{
+				Effect.BlindUp('configdiv');
+			}
+
+			window.onload = document.getElementById('configdiv').className = 'genericSlideDownhide';
+
+			function isDown()
+			{
+				if(document.getElementById('configdiv').className == 'genericSlideDownshow')
+				{
+					return true;
+				}
+
+				else return false;
+
+			}
+
+			function isUp()
+			{
+				if(document.getElementById('configdiv').className == 'genericSlideDownhide')
+				{
+					return true;
+				}
+
+				else return false;
+			}
+			</script>
+
+			<?php
+
+
+		single_end(array ());
+		generic_footer(array ());
+?>
+

@@ -1,0 +1,42 @@
+<?php
+
+/*
+ * Logout process
+ *
+ * Copyright (C) 2006 Voluna Software. All rights reserved.
+ *
+ */
+
+	require("pre.inc");
+
+//
+//
+
+if ((!$GLOBALS["authenticated"]) && (!$GLOBALS["userauthenticated"]))
+{
+	generic_header(array("title" => _("Not logged in!")));
+	dual_begin(array());
+
+	print("<h2>" . _("Not logged in!") . "</h2>\n");
+
+	print("<p><span class=\"red\">" . _("You tried to logout but you aren't logged in.") . "</span>\n" .
+		_("Please supply correct credentials to authenticate yourself to the system. You can use the form on the right hand side to login.") . "</p>\n");
+
+	dual_middle(array());
+	show_account_details(array());
+	dual_end(array());
+	generic_footer(array());
+}
+else
+{
+	//
+	// Log the person out
+	// and redirect to the home page
+	//
+
+	setcookie("usercookie", "", time() - (24 * 3600), "/", "", 1);
+	setcookie("passcookie", "", time() - (24 * 3600), "/", "", 1);
+	header("Location: /");
+}
+
+?>

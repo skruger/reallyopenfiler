@@ -1,0 +1,926 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+
+
+
+
+/*
+ * Quota: Group quota
+ *
+ *
+ */
+
+	require("pre.inc");
+        include("authenticated.inc");
+	require_once("authconfig.inc.php"); 
+
+        if ($_GET['filteron'])
+            $filteron = $_GET['filteron'];
+        else
+            $filteron = NULL;
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+	$volumes_fstype = array();
+
+	function volumes_startelement($parser, $name, $attrs)
+	{
+		global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg, $volumes_fstype;
+
+		if ($name == "VOLUME")
+		{
+			array_push($volumes_id, $attrs["ID"]);
+			array_push($volumes_name, $attrs["NAME"]);
+			array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+			array_push($volumes_vg, $attrs["VG"]);
+			array_push($volumes_fstype, $attrs["FSTYPE"]);
+		}
+	}
+
+	function volumes_endelement($parser, $name)
+	{
+	}
+
+	$volumes_parser = xml_parser_create();
+	xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+	$volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+	while ($volumes_data = fread($volumes_fp, 4096))
+		xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+	fclose($volumes_fp);
+	xml_parser_free($volumes_parser);
+
+	if (count($volumes_name) <= 0)
+	{
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+	if (strlen($volume) <= 0)
+	{
+		for ($i = 0; $i < count($volumes_id); $i++)
+		{
+			if ($volumes_fstype[$i] != "iscsi")
+			{
+				$volume = $volumes_id[$i];
+				$volume_vg = $volumes_vg[$i];
+				break;
+			}
+		}
+
+		if ($i == count($volumes_id))
+		{
+			header("Location: ./volumes.html");
+			exit;
+		}
+	}
+
+
+
+	if (isset($volumeinfo))
+	{
+		for ($i = 0; $i < count($volumes_name); $i++)
+			if ($volumeinfo == ("#!@-" . $volumes_id[$i] . "-#!@-" . $volumes_vg[$i] . "-#!@"))
+			{
+				$volume_mountpoint = $volumes_mountpoint[$i];
+				$volume_name = $volumes_name[$i];
+				$volume = $volumes_id[$i];
+				$volume_vg = $volumes_vg[$i];
+				$volume_fstype = $volumes_fstype[$i];
+				break;
+			}
+	}
+	else
+	{
+		for ($i = 0; $i < count($volumes_name); $i++)
+			if (($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg))
+			{
+				$volume_mountpoint = $volumes_mountpoint[$i];
+				$volume_name = $volumes_name[$i];
+				$volume_fstype = $volumes_fstype[$i];
+				break;
+			}
+	}
+
+	$fstype = $volume_fstype;
+
+	$fs = 0;
+	$fsfound = false;
+
+	for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+	{
+		if ($fs_info[$fsi]["type"] == $fstype)
+		{
+			$fs = $fsi;
+			$fsfound = true;
+			break;
+		}
+	}
+
+	if ($fsfound == false)
+		$fs = 0;
+
+
+	if ($volume_fstype == "iscsi")
+	{
+		header("Location: ./quota.html");
+		exit;
+	}
+
+	if (($_GET["sort"] == "gid") || ($_POST["sort"] == "gid"))
+		$sortorder = "gid";
+	else if (($_GET["sort"] == "gname") || ($_POST["sort"] == "gname"))
+		$sortorder = "gname";
+	else if (($_GET["sort"] == "gtype") || ($_POST["sort"] == "gtype"))
+		$sortorder = "gtype";
+	else
+		$sortorder = "none";
+
+
+	$authobj = new Authconfig(); 
+
+
+	$groups_gid = array();
+	$groups_name = array();
+	$groups_properties = array();
+
+	endgrent();
+
+
+        function startsWith($char, $string) {
+
+            $firstChar = substr($string, 0, 1);
+
+            if (strcasecmp($char,$firstChar) == 0) {
+                return TRUE;
+            }
+
+            return FALSE;
+
+        }
+
+	while ($group_info = getgrent())
+	{
+		if  (($group_info["gr_gid"] >= $global_min_gid))
+		{
+                        global $filteron;
+                        if ($filteron != NULL) {
+                            if (startsWith($filteron, $group_info["gr_name"] )) {
+                                array_push($groups_gid, $group_info["gr_gid"]);
+                                array_push($groups_name, $group_info["gr_name"]);
+                                array_push($groups_properties, "Unknown");
+                            }
+                        }
+
+                        else {
+
+                            array_push($groups_gid, $group_info["gr_gid"]);
+                            array_push($groups_name, $group_info["gr_name"]);
+                            array_push($groups_properties, "Unknown");
+
+                        }
+                }
+	}
+
+	endgrent();
+
+	$list_n = count($groups_gid);
+
+	$list_pages = intval(ceil($list_n / $list_count));
+
+	$list_cur_page = intval($_GET["list_cur_page"]);
+
+	if (($list_cur_page < 0) || ($list_cur_page > ($list_pages - 1)))
+		$list_cur_page = 0;
+
+	if ($list_cur_page == ($list_pages - 1))
+	{
+		$list_next_page = 0;
+		$list_prev_page = $list_cur_page - 1;
+	}
+	else if ($list_cur_page == 0)
+	{
+		$list_next_page = $list_cur_page + 1;
+		$list_prev_page = $list_pages - 1;
+	}
+	else
+	{
+		$list_next_page = $list_cur_page + 1;
+		$list_prev_page = $list_cur_page - 1;
+	}
+
+	if (($list_prev_page < 0) || ($list_prev_page > ($list_pages - 1)))
+		$list_prev_page = 0;
+
+	if (($list_next_page < 0) || ($list_next_page > ($list_pages - 1)))
+		$list_next_page = 0;
+
+	$list_start = $list_cur_page * $list_count;
+	$list_end = ($list_cur_page + 1) * $list_count;
+
+	if ($list_end > $list_n)
+		$list_end = $list_n;
+
+	if (strncasecmp($authobj->globalSettings['nss_nis'], "enabled", 7) == 0)
+	{
+		// add NIS groups
+
+		$groupp = popen("export LANG=C; /usr/bin/sudo /usr/bin/ypcat group", "r");
+
+		$i = 0;
+		while (!feof($groupp))
+		{
+			$gresult[$i] = explode(":", fgets($groupp, 4096));
+
+			foreach (($gresult[$i]) as $gresultitem)
+				$gresultitem = trim($gresultitem);
+
+			if ((strlen($gresult[$i][0]) > 0) && ($gresult[$i][2] >= $global_min_gid))
+			{
+				for ($j = 0; $j < count($groups_gid); $j++)
+					if (($groups_gid[$j] == $gresult[$i][2]) && ($groups_name[$j] == $gresult[$i][0]) && ($groups_properties[$j] == "Unknown"))
+						$groups_properties[$j] = "NIS";
+			}
+
+			$i++;
+		}
+
+		pclose($groupp);
+
+	}
+
+	if (strncasecmp($authobj->globalSettings['nss_ldap'], "enabled", 7) == 0)
+	{
+		// add LDAP groups
+
+		$groupGID = array();
+		foreach (getLDAPgroup() as $ldapgroup)
+			$groupGID[$ldapgroup[gid]] = $ldapgroup[name];
+		for ($j = 0; $j < count($groups_gid); $j++)
+			if ($groupGID[$groups_gid[$j]] == $groups_name[$j])
+				$groups_properties[$j] = "LDAP";
+	}
+
+	if (strncasecmp($authobj->globalSettings['nss_hesiod'], "enabled", 7) == 0)
+	{
+		// add Hesiod groups
+	}
+
+	// add local groups
+
+	$groupp = popen("export LANG=C; /usr/bin/sudo /bin/cat /etc/group", "r");
+	$i = 0;
+	while (!feof($groupp))
+	{
+		$gresult[$i] = explode(":", fgets($groupp, 4096));
+		foreach (($gresult[$i]) as $gresultitem)
+			$gresultitem = trim($gresultitem);
+
+		if ((strlen($gresult[$i][0]) > 0) && ($gresult[$i][2] >= $global_min_gid))
+		{
+			for ($j = 0; $j < count($groups_gid); $j++)
+				if (($groups_gid[$j] == $gresult[$i][2]) && ($groups_name[$j] == $gresult[$i][0]) && ($groups_properties[$j] == "Unknown"))
+					$groups_properties[$j] = "Local";
+		}
+
+		$i++;
+	}
+
+	pclose($groupp);
+
+	if ($sortorder == "gname")
+		array_multisort($groups_name, $groups_properties, $groups_gid);
+	else if ($sortorder == "gid")
+		array_multisort($groups_gid, $groups_name, $groups_properties);
+	else if ($sortorder == "gtype")
+		array_multisort($groups_properties, $groups_gid, $groups_name);
+
+	$quota = array();
+	$quotap = popen("export LANG=C; /usr/bin/sudo /usr/sbin/repquota -v -g -n " . escapeshellarg($volume_mountpoint), "r");
+
+	while (!feof($quotap))
+	{
+		$string = trim(fgets($quotap, 4096));
+		$strarray = explode(" ", $string);
+		$qarray = array();
+
+		foreach ($strarray as $strelement)
+		{
+			$element = trim($strelement);
+			if (strlen($element) == 0)
+				continue;
+			else
+				array_push($qarray, $element);
+		}
+
+		array_push($quota, $qarray);
+	}
+
+	pclose($quotap);
+
+   $currentVol = new fs_utility(escapeshellarg($volume_mountpoint));
+   $currentFSMax = $currentVol->get_dfcommand_fssize();
+   $currentInodeMax = $currentVol->get_dfcommand_inodes();
+
+
+
+
+	generic_header(array("title" => _("Quota : Groups"), "ajax" => $ajax));
+	single_begin(array());
+
+?>
+
+<script type="text/javascript">
+<!--
+
+var state = false;
+
+function checkboxes()
+{
+	if (state == true)
+		state = false;
+	else
+		state = true;
+
+<?php
+	for ($i = 0; $i < count($groups_gid); $i++)
+		print("\tdocument.groupquotaform.check" . $groups_gid[$i] . ".checked = state;\n");
+?>
+}
+
+// -->
+</script>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_QUOTA");
+?>
+	<h3 align="center">Select Volume</h3>
+	<?php printMessageBlock("info", "<p>Select a volume below to bring up group quota for that particular
+	volume in the list below.</p>"); ?>
+	<form action="quota.html" method="get">
+	<p align="center">
+	<input type="hidden" name="list_cur_page" value="<?php print($list_cur_page); ?>" />
+	<input type="hidden" name="sort" value="<?php print($sortorder); ?>" />
+	<select name="volumeinfo">
+<?php
+	for ($i = 0; $i < count($volumes_name); $i++)
+	{
+		if ($volumes_fstype[$i] != "iscsi")
+			print("\t\t<option" . ((($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg)) ? " selected=\"selected\"" : "") . " value=\"" . htmlentities("#!@-" . $volumes_id[$i] . "-#!@-" . $volumes_vg[$i] . "-#!@") . "\">" . htmlentities($volumes_name[$i]) . " (group:" . htmlentities($volumes_vg[$i]) . " / volume:" . htmlentities($volumes_id[$i]) . ")</option>\n");
+	}
+?>
+	</select>&nbsp;<input type="submit" value="Change" />
+	</p>
+	</form>
+
+	<p>&nbsp;</p>
+
+	<hr />
+
+	<h3 align="center">Edit group quota</h3>
+
+
+<?php
+	if ($fstype == "jfs")
+		print("<div class=\"warning\">This filesystem does not support quota configuration. Settings will not be applied.</div>\n");
+	else if ($fstype == "reiserfs")
+		print("<div class=\"warning\">This filesystem does not support file limits. Please apply capacity limits.</div>\n");
+?>
+
+<?php
+	print("<form name=\"groupquotaform\" method=\"post\" action=\"quota.html\">\n");
+	print("<input type=\"hidden\" name=\"list_cur_page\" value=\"" . $list_cur_page . "\" />\n");
+	print("<input type=\"hidden\" name=\"sort\" value=\"" . $sortorder . "\" />\n");
+	print("<input type=\"hidden\" name=\"volume\" value=\"" . $volume . "\" />\n");
+	print("<input type=\"hidden\" name=\"volume_vg\" value=\"" . $volume_vg . "\" />\n");
+	 print("<input type=\"hidden\" name=\"savedfsblocksize\" id=\"savedfsblocksize\" value=\"" . $fs_info[$fs]["fs_block_size"] . "\"/>\n");
+        print("<input type=\"hidden\" name=\"savedvolumemountpoint\" id=\"savedvolumemountpoint\" value=\"" . $volume_mountpoint . "\"/>\n");
+
+
+
+	printMessageBlock("info", "<p>You can mark a number of groups below using the <strong>'X'</strong> column checkboxes
+	and set all their quota using the form immediately below.</p>");
+?>
+	<div style="margin-left: auto; margin-right: auto;">
+	<table  cellpadding="8" cellspacing="2" border="0">
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Limit (MB)</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Total Files</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Apply</strong></td>
+	</tr>
+	<tr>
+	<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="text" id="gblocks" name="gblocks" value="0" style="text-align: right;" size="10" onchange="s.setValue(parseInt(this.value));" /><div class="slider" id="slider-1"><input class="slider-input" id="slider-input-1"/></div></td>
+
+                <td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="text" id="ginodes" name="ginodes" value="0" style="text-align: right;" size="10" onchange="s2.setValue(parseInt(this.value)); " /><div class="slider" id="slider-2"><input class="slider-input" id="slider-input-2"/></div></td>
+
+                <td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="button" title="Apply selected groups' quota changes" id="requestgroups" name="requestgroups" value="Apply" size="10" onclick="if (!isNumeric(document.getElementById('gblocks').value) || !isNumeric(document.getElementById('ginodes').value)) enterValidNumber(); else { tinker_setQuotaBulk(document.getElementById('gblocks').value, document.getElementById('ginodes').value, document.getElementById('savedfsblocksize').value, document.getElementById('savedvolumemountpoint').value, getBlocksValArray(), getInodesValArray(), getCheckedArray());} return false;"/></td>
+
+
+
+	</tr>
+	</table>
+	</div>
+
+        <div style="margin-top: 10px; margin-bottom: 10px; margin-left: auto; margin-right: auto; padding: 10px;">
+        <table cellspacing="2" cellpadding="8" border="0">
+            <tr>
+                <td align="center" class="color_table_heading">Filter List</td>
+           </tr>
+           <tr><td class="color_table_row2">
+        <?php
+            for ($i=65; $i<=90; $i++)
+                printf("<a style=\"font-weight: bold; text-decoration: none;\" href=\"./quota.html?sort=$sortorder&amp;volume=$volume&amp;volume_vg=$volume_vg&amp;list_cur_page=$list_cur_page&amp;filteron=%c\">%c</a>&nbsp;&nbsp;",$i+32, $i);
+        ?>
+
+        <a style="font-weight: bold; text-decoration: none;" href="./quota.html">*</a>
+        </td>
+        </tr>
+        </table>
+        </div>
+
+	<p>&nbsp;</p>
+
+	<p align="center">Click on <em>Apply</em> after entering new quota values to change a group's quota<br />
+	for the <em><?php print($volume_name); ?></em> volume.</p>
+
+	<div style="margin-left: auto; margin-right: auto;">
+
+	<table cellpadding="8" cellspacing="2" border="0" width="90%">
+	<tr>
+		<td align="left" width="33%" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><a style="display: block;" href="quota.html?sort=<?php print($sortorder); ?>&amp;volume=<?php print($volume); ?>&amp;volume_vg=<?php print($volume_vg); ?>&amp;list_cur_page=<?php print($list_prev_page); if ($filteron != NULL)?>&amp;filteron=<?php print($filteron);?>"><strong>&#x00ab; Previous page</strong></a></td>
+		<td align="center" width="33%" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><strong><?php print("Page " . ($list_cur_page + 1) . " of " . $list_pages) ?></strong></td>
+		<td align="right" width="33%" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><a style="display: block;" href="quota.html?sort=<?php print($sortorder); ?>&amp;volume=<?php print($volume); ?>&amp;volume_vg=<?php print($volume_vg); ?>&amp;list_cur_page=<?php print($list_next_page);  if ($filteron != NULL)?>&amp;filteron=<?php print($filteron);?>"><strong>Next page &#x00bb;</strong></a></td>
+	</tr>
+	</table>
+	</div>
+
+	<div align="center">
+
+	<table cellpadding="8" cellspacing="2" border="0">
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong><a name="xref" href="#xref" onclick="checkboxes(); return false;" title="Click here to select all groups">X</a></strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><a href="?sort=gid&amp;volume=<?php print($volume); ?>&amp;volume_vg=<?php print($volume_vg); ?>" title="Sort groups by GID">GID</a></strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><a href="?sort=gname&amp;volume=<?php print($volume); ?>&amp;volume_vg=<?php print($volume_vg); ?>" title="Sort groups by Name">Name</a></strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><a href="?sort=gtype&amp;volume=<?php print($volume); ?>&amp;volume_vg=<?php print($volume_vg); ?>" title="Sort groups by Type">Type</a></strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Limit (MB)</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Used (MB)</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Free (MB)</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Total Files</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Used Files</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Free Files</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Apply</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Reset</strong></td>
+
+	</tr>
+<?php
+
+
+
+ $dcolor = 0;
+
+        for ($i = $list_start; $i < $list_end; $i++)
+        {
+                if ($dcolor == 0)
+                {
+                        $dcolor = 1;
+                        $dvalue = $GLOBALS["color_table_row1"];
+                }
+                else
+                {
+                        $dcolor = 0;
+                        $dvalue = $GLOBALS["color_table_row2"];
+                }
+
+                print("<tr>\n");
+                print("\t<td valign=\"middle\" bgcolor=\"" . $dvalue . "\"><input type=\"checkbox\" id=\"check" . $groups_gid[$i] . "\" name=\"check" . $groups_gid[$i] . "\" /></td>\n");
+                print("\t<td valign=\"middle\" bgcolor=\"" . $dvalue . "\">" . $groups_gid[$i] . "</td>\n");
+                print("\t<td valign=\"middle\" bgcolor=\"" . $dvalue . "\">" . $groups_name[$i] . "</td>\n");
+                print("\t<td valign=\"middle\" bgcolor=\"" . $dvalue . "\">" . $groups_properties[$i] . "</td>\n");
+
+                for ($j = 0; $j < count($quota); $j++)
+                {
+                        $qline = $quota[$j];
+                        if ($qline[0] == "#" . $groups_gid[$i])
+                                break;
+                }
+
+
+                print("\t<td valign=\"middle\" align=\"center\" bgcolor=\"" . $dvalue . "\">\n");
+
+                     print("<input type=\"hidden\" name=\"gival" . $groups_gid[$i] . "\" id=\"gival" . $groups_gid[$i] . "\" value=\"" . (intval($qline[7]) - intval($qline[6]))  . "\"/>\n");
+                     print("<input type=\"hidden\" name=\"gbval" . $groups_gid[$i] . "\" id=\"gbval" . $groups_gid[$i] . "\" value=\"" . intval(round(((intval($qline[3]) - intval($qline[2])) / $fs_info[$fs]["fs_block_size"])))  . "\"/>\n");
+
+                print("\t<input type=\"text\" name=\"gblocks" . $groups_gid[$i] . "\"  id=\"gblocks" . $groups_gid[$i] . "\"  style=\"text-align: right;\" value=\"" . (intval($qline[3]) / $fs_info[$fs]["fs_block_size"]) . "\" size=\"10\"   onchange=\"s" . $groups_gid[$i] . ".setValue(parseInt(this.value))\"     /><div class=\"slider\" id=\"slider-" . $groups_gid[$i] . "\"><input class=\"slider-input\" id=\"slider-input-" . $groups_gid[$i] . "\" /></div>\n");
+                print("\t</td>\n");
+                print("\t<td valign=\"middle\" align=\"right\" bgcolor=\"" . (((intval($qline[3]) > 0) && (intval($qline[2]) > intval($qline[3]))) ? "#ff8080" : $dvalue) . "\">");
+                print("\t" . sprintf("%.00f", (intval($qline[2])  / $fs_info[$fs]["fs_block_size"])) . "</td>\n");
+        //      print("\t</td>\n");
+                print("\t<td id=\"gblocksvaltd" . $groups_gid[$i] . "\" valign=\"middle\" align=\"right\" bgcolor=\"" . (((intval($qline[3]) > 0) && ((intval($qline[3]) - intval($qline[2])) < 0)) ? "#ff8080" : $dvalue) . "\">");
+                print("<div id=\"gblocksval" . $groups_gid[$i] . "\">" . ((intval($qline[3]) > 0) ? sprintf("%.00f", (intval($qline[3]) - intval($qline[2])) / $fs_info[$fs]["fs_block_size"]) : "0") . "</div></td>\n");
+                //print("\t</td>\n");
+                print("\t<td valign=\"middle\" align=\"center\"   bgcolor=\"" . $dvalue . "\">\n");
+                print("\t<input type=\"text\" name=\"ginodes" . $groups_gid[$i] . "\" id=\"ginodes" . $groups_gid[$i] . "\" style=\"text-align: right;\" value=\"" . intval($qline[7]) . "\" size=\"10\" onchange=\"s2_" . $groups_gid[$i] . ".setValue(parseInt(this.value))\"     /><div class=\"slider\" id=\"slider2-" . $groups_gid[$i] . "\"><input class=\"slider-input\" id=\"slider2-input-" . $groups_gid[$i] . "\" /></div>\n");                 print("\t</td>\n");
+                print("\t<td valign=\"middle\" align=\"right\" bgcolor=\"" . (((intval($qline[7]) > 0) && (intval($qline[6]) > intval($qline[7]))) ? "#ff8080" : $dvalue) . "\">\n");
+                print("\t" . intval($qline[6]) . "\n");                 print("\t</td>\n");                 print("\t<td id=\"ginodesvaltd" . $groups_gid[$i] . "\" valign=\"middle\" align=\"right\" bgcolor=\"" . (((intval($qline[7]) > 0) && ((intval($qline[7]) - intval($qline[6])) < 0)) ? "#ff8080" : $dvalue) . "\">");                 print("<div id=\"ginodesval" . $groups_gid[$i] . "\">"  . ((intval($qline[7]) > 0) ? (intval($qline[7]) - intval($qline[6])) : "0") . "</div></td>\n");
+//              print("\t</td>\n");
+                print("\t<td valign=\"middle\" bgcolor=\"" . $dvalue . "\">\n");
+                print("\t<input id=\"request" . $groups_gid[$i] . "\" type=\"button\" title=\"Save this group quota changes\" name=\"request" . $groups_gid[$i] . "\"   value=\"Apply\" size=\"10\" onclick=\" if (!isNumeric(document.getElementById('gblocks" . $groups_gid[$i] ."').value) || !isNumeric(document.getElementById('ginodes" . $groups_gid[$i] . "').value)) enterValidNumber(); else  runSetQuota($groups_gid[$i]);\" />\n");
+                print("\t</td>\n");
+                print("\t<td valign=\"middle\" bgcolor=\"" .$dvalue . "\">\n");
+
+                print("\t<input type=\"button\" title=\"Reset slider value\" name=\"reset" . $groups_gid[$i] . "\" id=\"reset" . $groups_gid[$i] . "\" value=\"Reset\" size=\"10\" onclick=\"s" . $groups_gid[$i] . ".setValue(parseInt(document.getElementById('gbval" . $groups_gid[$i] . "').value)); s2_" . $groups_gid[$i] . ".setValue(parseInt(document.getElementById('gival" . $groups_gid[$i] . "').value)); disableButtons(document.getElementById('request" . $groups_gid[$i] . "'), document.getElementById('reset" . $groups_gid[$i] . "'));\" />\n");
+
+                print("\t</td>\n");
+                print("</tr>\n");
+
+
+	}
+
+?>
+	</table>
+	</div>
+
+	<p>&nbsp;</p>
+
+<?php
+	print("</form>\n");
+
+print("<script type=\"text/javascript\">\n");
+
+	print("var s = new Slider(document.getElementById(\"slider-1\"), document.getElementById(\"slider-input-1\"));\n");
+	print("\t s.onchange = function () { \n");
+	print("\t s.setMinimum(parseInt(0));\n");
+	print("\t s.setMaximum(parseInt($currentFSMax));\n");
+	print("\t document.getElementById(\"gblocks\").value = s.getValue();\n");
+	print("\t s.setBlockIncrement(parseInt(5));\n");
+        print("\t document.groupquotaform.requestgroups.disabled=false;\n");
+
+	print("};\n\n");
+
+
+
+	print("var s2 = new Slider(document.getElementById(\"slider-2\"), document.getElementById(\"slider-input-2\"));\n");
+        print("\t s2.onchange = function () { \n");
+        print("\t s2.setMinimum(parseInt(0));\n");
+        print("\t s2.setMaximum(parseInt($currentInodeMax));\n");
+        print("\t document.getElementById(\"ginodes\").value = s2.getValue();\n");
+        print("\t s2.setBlockIncrement(parseInt(5));\n");
+	print("\t document.groupquotaform.requestgroups.disabled=false;\n");
+
+        print("};\n\n");
+
+
+        for ($k = $list_start; $k < $list_end; $k++) {
+
+        print("var s" . $groups_gid[$k] . " = new Slider(document.getElementById(\"slider-" . $groups_gid[$k] . "\"), document.getElementById(\"slider-input-" . $groups_gid[$k] . "\"));\n");
+
+        print("s" . $groups_gid[$k] . ".onchange = function () {\n");
+        print("\t s" . $groups_gid[$k] . ".setMinimum(parseInt(0));\n");
+        print("\t s" . $groups_gid[$k] . ".setMaximum(parseInt($currentFSMax));\n");
+        print("\t document.getElementById(\"gblocks" . $groups_gid[$k] . "\").value = s" . $groups_gid[$k] . ".getValue();\n ");
+        print("\t s" . $groups_gid[$k] . ".setBlockIncrement(parseInt(5));\n");
+
+	print("\n\t if (document.groupquotaform.request" . $groups_gid[$k] . ".disabled == true){ \n");
+        print("\t\t document.groupquotaform.request" . $groups_gid[$k] . ".disabled=false;\n");
+        print("\t }\n");
+
+        print("\t if (document.groupquotaform.reset" . $groups_gid[$k] . ".disabled == true){ \n");
+        print("\t\t document.groupquotaform.reset" . $groups_gid[$k] . ".disabled=false;\n");
+        print("\t }\n");
+
+
+
+
+
+
+        print("};\n\n");
+
+
+
+  print("var s2_" . $groups_gid[$k] . " = new Slider(document.getElementById(\"slider2-" . $groups_gid[$k] . "\"), document.getElementById(\"slider2-input-" . $groups_gid[$k] . "\"));\n");
+
+        print("s2_" . $groups_gid[$k] . ".onchange = function () {\n");
+        print("\t s2_" . $groups_gid[$k] . ".setMinimum(parseInt(0));\n");
+        print("\t s2_" . $groups_gid[$k] . ".setMaximum(parseInt($currentInodeMax));\n");
+        print("\t document.getElementById(\"ginodes" . $groups_gid[$k] . "\").value = s2_" . $groups_gid[$k] . ".getValue();\n ");
+        print("\t s2_" . $groups_gid[$k] . ".setBlockIncrement(parseInt(5));\n");
+
+	print("\n\t if (document.groupquotaform.request" . $groups_gid[$k] . ".disabled == true){ \n");
+        print("\t\t document.groupquotaform.request" . $groups_gid[$k] . ".disabled=false;\n");
+        print("\t }\n");
+
+        print("\t if (document.groupquotaform.reset" . $groups_gid[$k] . ".disabled == true){ \n");
+        print("\t\t document.groupquotaform.reset" . $groups_gid[$k] . ".disabled=false;\n");
+        print("\t }\n");
+
+
+
+	print("};\n\n");
+
+
+        }
+
+
+        print("function onloadQuota() {\n");
+	print("\t s.setMinimum(parseInt(0));\n");
+	print("\t s2.setMinimum(parseInt(0));\n");
+	print("\t s.setMaximum(parseInt($currentFSMax));\n");
+	print("\t s2.setMaximum(parseInt($currentInodeMax));\n");
+
+        for ($k = $list_start; $k < $list_end; $k++) {
+
+        print("\t s" . $groups_gid[$k] . ".setMinimum(parseInt(0));\n");
+        print("\t s" . $groups_gid[$k] . ".setMaximum(parseInt($currentFSMax));\n");
+        print("\t s2_" . $groups_gid[$k] . ".setMinimum(parseInt(0));\n");
+        print("\t s2_" . $groups_gid[$k] . ".setMaximum(parseInt($currentInodeMax));\n");
+
+
+for ($j = 0; $j < count($quota); $j++)                {
+                      $qline = $quota[$j];
+                        if ($qline[0] == "#" . $groups_gid[$k])
+                                break;
+}
+
+        print("\t s" . $groups_gid[$k] . ".setValue(parseInt(" . intval($qline[3]) / $fs_info[$fs][fs_block_size] . "))\n");
+        print("\t s2_" . $groups_gid[$k] . ".setValue(parseInt(" . intval($qline[7]) . "))\n");
+
+	print("\t document.groupquotaform.request" . $groups_gid[$k] . ".disabled=true;\n");
+        print("\t document.groupquotaform.reset" . $groups_gid[$k] . ".disabled=true;\n");
+
+
+
+
+        }
+
+
+print("};\n\n");
+
+
+        print("window.onresize = function () {\n");
+
+        for ($k = $list_start; $k < $list_end; $k++) {
+
+        print("\t s" . $groups_gid[$k] . ".recalculate();\n ");
+        print("\t s2_" . $groups_gid[$k] . ".recalculate();\n ");
+
+
+        }
+        print("};\n\n");
+
+
+        print("</script>\n");
+
+?>
+<script language="JavaScript" type="text/javascript">
+/* <![CDATA[ */
+
+function  disableButtons(applyButton, resetButton){
+
+        var applyButtonNode = document.getElementById(applyButton.id);
+        applyButtonNode.disabled=true;
+        var resetButtonNode = document.getElementById(resetButton.id);
+        resetButtonNode.disabled=true;
+}
+
+
+function  disableButton(applyButton){
+        var applyButtonNode = document.getElementById(applyButton.id);
+        applyButtonNode.disabled=true;
+
+}
+
+
+function enableButton(applyButton){
+
+        var applyButtonNode = document.getElementById(applyButton.id);
+        applyButtonNode.disabled=false;
+
+}
+
+
+
+function enableButtons(applyButton, resetButton){
+
+
+
+       var applyButtonNode = document.getElementById(applyButton.id);
+        applyButtonNode.disabled=false;
+        var resetButtonNode = document.getElementById(resetButton.id);
+        resetButtonNode.disabled=false;
+
+
+
+
+}
+
+
+
+
+function resetSliders(blockSlider, inodeSlider, applyButton, resetButton, gbval, gival){
+
+        blockSlider.setValue(parseInt(gbval));
+        inodeSlider.setValue(parseInt(gival));
+        disableButtons(applyButton, resetButton);
+}
+
+function replaceNode(nodeName){
+
+
+                var progress = document.createElement('img');
+                progress.src = '/images/progress.gif';
+                //var elem = document.getElementById(nodeName.id);
+                nodeName.appendChild(progress);
+
+}
+
+
+
+function runSetQuota(gid)
+{
+
+	var gblocks = "gblocks" + gid;
+	var ginodes = "ginodes" + gid;
+	var gbval = "gbval" + gid;
+	var gival = "gival" + gid;
+	var gblocksvaltd = "gblocksvaltd" + gid;
+	var ginodesvaltd = "ginodesvaltd" + gid;
+	var request = "request" + gid;
+	var reset = "reset" + gid;
+
+
+	if (parseInt(document.getElementById(gblocks).value) != parseInt(document.getElementById(gbval).value))
+		replaceNode(document.getElementById(gblocksvaltd));
+	if (parseInt(document.getElementById(ginodes).value) != parseInt(document.getElementById(gival).value))
+		replaceNode(document.getElementById(ginodesvaltd));
+
+	disableButtons(document.getElementById(request), document.getElementById(reset));
+
+	tinker_setQuota(
+			document.getElementById(gblocks).value,
+			document.getElementById(ginodes).value,
+			document.getElementById('savedfsblocksize').value,
+			document.getElementById('savedvolumemountpoint').value,
+			document.getElementById(gbval).value,
+			document.getElementById(gival).value,
+			gid
+			);
+
+}
+
+function getCheckedArray(){
+
+
+        var uidArray = new Array;
+
+        <?php
+
+        for ($k = $list_start; $k < $list_end; $k++)
+        {
+
+                print("\t if (document.groupquotaform.check" . $groups_gid[$k] . ".checked == true)\n");
+                print("\t {\n");
+                print("\t\t uidArray.push($groups_gid[$k]);\n");
+                print("\t}\n\n");
+        }
+
+
+
+?>
+
+
+        return(uidArray);
+
+}
+
+
+
+function getBlocksValArray(){
+
+
+        var blocksValArray = new Array;
+
+        <?php
+
+        for ($k = $list_start; $k < $list_end; $k++)
+        {
+
+                print("\t if (document.groupquotaform.check" . $groups_gid[$k] . ".checked == true){\n");
+                print("\t\t var elemblocks" . $groups_gid[$k] . " = document.getElementById(\"gbval" . $groups_gid[$k] . "\").value;\n");
+                print("\t\t blocksValArray.push(elemblocks" . $groups_gid[$k] . ");\n");
+                print("\t\t if (parseInt(document.getElementById('gblocks').value) != parseInt(elemblocks" . $groups_gid[$k] . "))\n");
+                print("\t\t replaceNode(document.getElementById(\"gblocksvaltd" . $groups_gid[$k] . "\"));\n");
+
+
+                print("\t }\n\n");
+        }
+
+
+
+?>
+
+
+        return(blocksValArray);
+
+}
+
+function getInodesValArray(){
+
+        var inodesValArray = new Array;
+
+        <?php
+
+        for ($k = $list_start; $k < $list_end; $k++)
+        {
+
+                print("\t if (document.groupquotaform.check" . $groups_gid[$k] . ".checked == true){\n");
+                print("\t\t var eleminodes" . $groups_gid[$k] . " = document.getElementById(\"gival" . $groups_gid[$k] . "\").value;\n");
+                print("\t\t inodesValArray.push(eleminodes" . $groups_gid[$k] . ");\n");
+                print("\t\t if (parseInt(document.getElementById('ginodes').value) != parseInt(eleminodes" . $groups_gid[$k] . "))\n");
+                print("\t\t replaceNode(document.getElementById(\"ginodesvaltd" . $groups_gid[$k] . "\"));\n");
+
+                print("\t }\n\n");
+        }
+
+ ?>
+
+
+        return(inodesValArray);
+
+}
+
+
+function isNumeric(sText)
+
+{
+   var ValidChars = "0123456789";
+   var IsNumber=true;
+   var Char;
+
+
+   for (i = 0; i < sText.length && IsNumber == true; i++)
+      {
+      Char = sText.charAt(i);
+      if (ValidChars.indexOf(Char) == -1)
+         {
+         IsNumber = false;
+         }
+      }
+   return IsNumber;
+
+   }
+
+
+
+function enterValidNumber(){
+
+        alert("Please Enter a Valid Number");
+
+}
+
+/* ]]> */
+</script>
+
+<?php
+
+
+
+
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

@@ -1,0 +1,13 @@
+<?xml version="1.0" ?>
+<smb>
+        <serverstring value="Openfiler NAS" />
+        <encryptedpasswords value="on" />
+        <winbindpolicy value="on" />
+        <doscharset value="CP850" />
+        <unixcharset value="UTF-8" />
+        <displaycharset value="LOCALE" />
+        <ldapusersuffix value="ou=People" />
+        <ldapgroupsuffix value="ou=Group" />
+        <winbindseparator value="\" />
+</smb>
+

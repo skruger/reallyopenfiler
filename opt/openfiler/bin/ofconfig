@@ -1,0 +1,6 @@
+#!/bin/sh
+
+echo "This interface has not been implemented yet."
+
+read
+

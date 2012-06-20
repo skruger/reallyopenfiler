@@ -1,0 +1,13 @@
+#%PAM-1.0
+auth       required     pam_securetty.so
+auth       sufficient   pam_winbind.so
+auth       sufficient   pam_unix.so use_first_pass
+auth       required     pam_stack.so service=system-auth
+auth       required     pam_nologin.so
+account    sufficient   pam_winbind.so
+account    required     pam_stack.so service=system-auth
+password   required     pam_stack.so service=system-auth
+session    required     pam_stack.so service=system-auth
+session    required     pam_mkhomedir.so skel=/etc/skel umask=0077
+session    optional     pam_console.so
+

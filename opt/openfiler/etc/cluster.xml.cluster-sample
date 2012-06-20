@@ -1,0 +1,61 @@
+<?xml version="1.0" ?>
+
+<!--
+
+	NOTE: PLEASE DO NOT USE / UPDATE THIS FILE UNLESS YOU ARE AWARE
+              OF WHAT YOU ARE DOING.
+
+	This is a sample cluster.xml file geared towards clustering. This
+	works with the entries in rsync.xml and the Openfiler code and
+	controls the heartbeat function by saying what needs to happen 
+	in case of a failure of the primary and `takeover' by a secondary.
+
+	This needs a lot of existing heartbeat infrastructure to setup first
+	before enabling this file, and several custom patched packages to
+	work together, and with Openfiler. While all the software comes
+	bundled with Openfiler, setting up heartbeat is not for the faint
+	of heart right now.
+
+	These files are provided as a reference in the spirit of keeping
+	things open. However, if you need to use replication, you may very
+	well be able to afford to offload this task to us by buying a
+	commercial support license.
+
+	Someday in the future, the cluster functionality will be easily
+	configurable from the interface.
+
+-->
+
+<cluster>
+
+	<!-- Enable clustering -->
+
+	<clustering state="on" />
+
+
+	<!-- heartbeat node -->
+
+	<nodename value="cluster" />
+
+
+	<!-- List of heartbeat HA resources with arguments; Their order is
+	     very important. -->
+
+	<resource value="IPaddr::10.1.3.65/24" />
+	<resource value="drbddisk::">
+	<resource value="LVM::vg0_drbd">
+
+	<!-- The replicated cluster metadata device (/dev/drbd0) should be
+             mounted first as it contains information about volumes and
+             snapshots. -->
+
+	<resource value="Filesystem::/dev/drbd0::/mnt/cluster_metadata::ext3::defaults">
+
+	<!-- Make mountpaths for the replicated user volumes and snapshots
+             so that the resources later in the HA resources script can
+             mount them. -->
+
+	<resource value="MakeMounts"/>
+
+</cluster>
+

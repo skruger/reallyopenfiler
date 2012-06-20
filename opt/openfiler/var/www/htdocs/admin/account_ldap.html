@@ -1,0 +1,668 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    include("authenticated.inc");
+
+    generic_header(array("title" => _("Accounts : Administration")));
+    single_begin(array());
+
+    function format_error($error){
+            foreach ($error as $line)
+                    $err_msg .= $line . "<br />\n";
+            $err_msg = "<div style=\"width: 100%; padding: 0px 0px 0px 15px\">" . $err_msg . "</div>";
+            return $err_msg;
+    }
+
+    $showuser=false;
+
+    switch ($action) {
+    case "change_passwd":
+            $showuser=true;
+            if ((!$user) || (!$passwd))
+                    break;
+
+            if (strlen($passwd) < 4){
+                    $err_msg="Password must be at least 4 characters.";
+                    break;
+            }
+            if ($passwd != $passwd2){
+                    $err_msg="Passwords do not match.";
+                    break;
+            }
+            $return = setLDAPpasswd($user, $passwd);
+            if ($return)
+                    $err_msg="Error changing password." . format_error($return);
+            break;
+    case "del_usr":
+            $showuser=true;
+            if (!$user)
+                    break;
+
+            $return = delLDAPuser($user);
+            if ($return)
+                    $err_msg="Error deleting user." . format_error($return);
+            break;
+    case "add_usr":
+            $showuser=true;
+            if (!$user)
+                    break;
+
+            if (strlen($password) < 4){
+                    $err_msg="Password must be at least 4 characters.";
+                    break;
+            }
+            if ($password != $password2){
+                    $err_msg="Passwords do not match.";
+                    break;
+            }
+            if (!empty($uid) && intval($uid) <= 500) {
+                $err_msg="UID must be > 500";
+                break;
+            }
+            $return = newLDAPuser($user, $gid, $uid);
+            if ($return){
+                    $err_msg="Error adding new user." . format_error($return);
+                    break;
+            }
+
+            $return = setLDAPpasswd($user, $password);
+            if ($return)
+                    $err_msg="Error setting user password." . format_error($return);
+            break;
+    case "edit_grp":
+            if ((!$newgroup) || (!$group))
+                    break;
+
+            $return = editLDAPgroup($group, $newgroup);
+            if ($return)
+                    $err_msg="Error editing group." . format_error($return);
+            break;
+    case "add_grp":
+            if (!$group)
+                    break;
+            
+            if (!empty($gid) && intval($gid) <= 500) {
+                $err_msg="GID must be > 500";
+                break;
+            }
+
+            $return = addLDAPgroup($group, $gid);
+            if ($return)
+                    $err_msg="Error adding new group." . format_error($return);
+            break;
+    case "del_grp":
+            if (!$group)
+                    break;
+
+            $return =delLDAPgroup($group);
+            if ($return)
+                    $err_msg="Error deleting group." . format_error($return);
+            break;
+    case "add_grp_usr":
+            if ((!$group) || (!$user))
+                    break;
+
+            $return = addLDAPgroupuser($group, $user);
+            if ($return)
+                    $err_msg="Error adding user to group." . format_error($return);
+            break;
+    case "del_grp_usr":
+            if ((!$group) || (!$user))
+                    break;
+
+            $return = delLDAPgroupuser($group, $user);
+            if ($return)
+                    $err_msg="Error deleting user from group." . format_error($return);
+            break;
+    }
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript"></script>
+<script src="popup.js" type="text/javascript" language="JavaScript"></script>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+
+function changepasswd(user, event)
+{
+	document.getElementById('changepasswd_user').innerHTML=user;
+	document.changepasswdpopup.user.value = user;
+
+	showPopup('changepasswdpopup', event);
+	return true;
+}
+
+function deleteuser(user, event)
+{
+	document.getElementById('deleteuser_user').innerHTML=user;
+	document.deleteuserpopup.user.value = user;
+
+	showPopup('deleteuserpopup', event);
+	return true;
+}
+
+function editgroup(group, event)
+{
+	document.getElementById('editgroup_group').innerHTML=group;
+	document.editgrouppopup.group.value = group;
+
+	showPopup('editgrouppopup', event);
+	return true;
+}
+
+function deletegroup(group, event)
+{
+	document.getElementById('deletegroup_group').innerHTML=group;
+	document.deletegrouppopup.group.value = group;
+
+	showPopup('deletegrouppopup', event);
+	return true;
+}
+
+function addgroupuser(group, event)
+{
+	document.getElementById('addgroupuser_group').innerHTML=group;
+	document.addgroupuserpopup.group.value = group;
+
+	showPopup('addgroupuserpopup', event);
+	return true;
+}
+
+function removegroupuser(user, group, event)
+{
+	document.getElementById('removegroupuser_name').innerHTML=user;
+	document.getElementById('removegroupuser_group').innerHTML=group;
+
+	document.removegroupuserpopup.group.value = group;
+	document.removegroupuserpopup.user.value = user;
+
+	showPopup('removegroupuserpopup', event);
+	return true;
+}
+
+function toggleUID()
+{
+	if(document.newuser.chkUID.checked == 1)
+		changeObjectVisibility('hiddenUID', 'visible')
+	else{
+		changeObjectVisibility('hiddenUID', 'hidden')
+		//reset the UID value
+		document.newuser.uid.value = '';
+		document.newuser.submit.focus();
+	}
+}
+
+function toggleGID()
+{
+	if(document.addgroup.chkGID.checked == 1)
+		changeObjectVisibility('hiddenGID', 'visible')
+	else{
+		changeObjectVisibility('hiddenGID', 'hidden')
+		//reset the GID value
+		document.addgroup.gid.value = '';
+		document.addgroup.submit.focus();
+	}
+}
+
+function showGroup()
+{
+	changeObjectVisibility('groupcontainer', 'visible');
+	changeObjectVisibility('usercontainer', 'hidden');
+	changeObjectVisibility('error_box', 'hidden');
+	document.getElementById("group").style.background="<?php print($GLOBALS["color_page_tab1_highlighted_background"]); ?>";
+	document.getElementById("user").style.background="<?php print($GLOBALS["color_page_tab1_regular_background"]); ?>";
+
+	return false;
+}
+function showUser()
+{
+	changeObjectVisibility('usercontainer', 'visible');
+	changeObjectVisibility('groupcontainer', 'hidden');
+	changeObjectVisibility('error_box', 'hidden');
+	document.getElementById("group").style.background="<?php print($GLOBALS["color_page_tab1_regular_background"]); ?>";
+	document.getElementById("user").style.background="<?php print($GLOBALS["color_page_tab1_highlighted_background"]); ?>";
+
+	return false;
+}
+// -->
+</script>
+
+<p>&nbsp;</p>
+
+<?php
+
+        nested_tab_begin("C_ACCOUNTS_ADMINISTRATION");
+if (testconnection()){
+	
+	
+        $gerrmsg = ""; 
+	global $ldap_password, $ldap_basedn, $ldap_rootdn;
+	if (($ldap_password) && ($ldap_basedn) && ($ldap_rootdn)){
+		$gerrmsg = "\t\t<br />Error message:<br />\n";
+		foreach (testconnection() as $errmsg)
+                    $gerrmsg .= "&nbsp;&nbsp;&nbsp;" . $errmsg . "<br/>";
+			
+	}
+	
+        printMessageBlock("error","\t\tPlease configure the LDAP section of the <a href=\"index.html\">Authentication</a> page before attempting to use this page.<br /> $gerrmsg\n");
+        
+	print("\t<br />\n");
+
+	nested_tab_end();
+	single_end(array());
+	generic_footer(array());
+}
+?>
+
+<table cellpadding="0" cellspacing="0" border="0" style="width: 95%;"><tr>
+<td id="page_nav" style="margin-left: auto; margin-right: auto;"><ul>
+<li id="group" <?php if(!$showuser) print("class=\"active\""); ?>><a href="#"  onclick="return showGroup();" >Group Administration</a></li>
+<li id="user" <?php if($showuser) print("class=\"active\""); ?>><a href="#" onclick="return showUser();" >User Administration</a></li>
+</ul>
+</td></tr>
+</table>
+
+<table cellpadding="8" cellspacing="2" border="0" style="width: 95%;">
+<tr><td colspan="2" align="center" style="margin-left: auto; margin-right: auto;">
+
+<?php
+
+	if ($err_msg){
+        printMessageBlock("error", $err_msg);
+		
+	}
+?>
+
+	<div id="groupcontainer" <?php if ($showuser){print("style=\"display:none\"");}?> >
+		<h3 align="center">Group Administration</h3>
+
+		<form name="addgroup" action="account_ldap.html" method="post">
+		<table cellpadding="8" cellspacing="2" border="0">
+		<tr>
+			<td width="100%"><div class="auth_config_head">Add new group</div></td>
+		</tr>
+		<tr>
+			<td>
+				<div class="auth_config_body">
+				<br />
+				<table align="center" cellpadding="8" cellspacing="2" border="0">
+				<tr>
+					<td class="color_table_heading" align="right"><strong>Group Name:</strong></td>
+					<td class="color_table_row1"><input type="text" name="group" value="" /></td>
+				</tr>
+				<tr>
+					<td class="color_table_heading">
+						Override automatic GID <input type="checkbox" name="chkGID" onclick="toggleGID()" />
+					</td>
+					<td class="color_table_row2">
+						&nbsp;
+					<div id="hiddenGID" style="visibility: hidden; display: none;">
+						GID Number:<br />
+						<input type="text" name="gid" value="" />
+					</div>
+					</td>
+				</tr>
+				<tr>
+					<td colspan="2" align="center">
+						<input type="hidden" name="action" value="add_grp" />
+						<input type="submit" name="submit" value="Add Group" />&nbsp;&nbsp;&nbsp;
+						<input type="reset" value="Reset" />
+					</td>
+				</tr>
+				</table>
+				</div>
+			</td>
+		</tr>
+		</table>
+		</form>
+
+		<table cellpadding="8" cellspacing="2" border="0">
+		<tr><td width="100%"><div class="auth_config_head">Group Control</div></td></tr>
+
+		<tr>
+			<td align="center">
+				<div class="auth_config_body">
+				<br />
+					<div style="border: 2px solid #ebebeb; width:100%; height:20em; text-align:left; background:white; overflow:auto; padding:4px;">
+						<table cellpadding="8" cellspacing="2" border="0" width="100%" bgcolor="white">
+	<?php
+
+		$LDAPgrouparray = getLDAPgroup();
+		$LDAPuserarray = getLDAPuser();
+
+		$userUID = array();
+		foreach ($LDAPuserarray as $ldapuser){
+			$userUID[$ldapuser[name]] = $ldapuser[uid];
+		}
+		foreach ($LDAPgrouparray as $ldapgroup){
+			print("\t\t\t\t\t\t\t<tr><td bgcolor=\"#ebebeb\">\n");
+			print("\t\t\t\t\t\t\t\t<a href=\"#\" onclick=\"return !editgroup('" . $ldapgroup[name] . "', event);\"><img src=\"/images/icons/edit_icon.png\" width=\"16\" height=\"16\" alt=\"Edit Group\" /></a>\n");
+			print("\t\t\t\t\t\t\t\t<a href=\"#\" onclick=\"return !deletegroup('$ldapgroup[name]', event);\"><img src=\"/images/icons/user_group_del.png\" width=\"16\" height=\"16\" alt=\"Delete Group\" /></a>\n");
+			print("\t\t\t\t\t\t\t\t<a href=\"#\" onclick=\"return !addgroupuser('$ldapgroup[name]', event);\"><img src=\"/images/icons/user_group_add.png\" width=\"16\" height=\"16\" alt=\"Add User to Group\" /></a>\n");
+			print("\t\t\t\t\t\t\t\t<strong>&nbsp;$ldapgroup[name] (gid: $ldapgroup[gid])</strong>\n");
+			print("\t\t\t\t\t\t\t</td></tr>\n");
+			print("\t\t\t\t\t\t\t<tr><td>\n");
+
+			if (count($ldapgroup[members])){
+				print("\t\t\t\t\t\t\t\t<p style=\"margin: 0px 0px 0px 40px;\">\n");
+
+				foreach ($ldapgroup[members] as $groupmember){
+					$uid = $userUID[$groupmember];
+					?>
+							<a href="#" onclick="return !removegroupuser('<?php print($groupmember) ?>','<?php print($ldapgroup[name]); ?>', event);"><img src="/images/icons/user_group_del.png" width="16" height="16" alt="Remove user from group" /></a>
+					<?php
+					if ($uid)
+						print($groupmember . " (uid: $uid)<br />\n");
+					else
+						print($groupmember . " <font color=\"red\">(not LDAP user)</font><br />\n");
+				}
+
+				print("\t\t\t\t\t\t\t\t</p>\n");
+			}
+			print("\t\t\t\t\t\t\t</td></tr>\n");
+		}
+
+	?>
+						</table>
+
+					</div>
+                                        <br/>
+					<table><tr>
+                                        <td align="center" valign="middle">
+						<img src="/images/icons/edit_icon.png" width="16" height="16" alt="Edit Item" /></td><td align="center" valign="middle">Edit Item&nbsp;</td>
+						<td align="center" valign="middle"><img src="/images/icons/user_group_del.png" width="16" height="16" alt="Delete Item" /></td><td align="center" valign="middle">Delete Item&nbsp;</td>
+						<td align="center" valign="middle"><img src="/images/icons/user_group_add.png" width="16" height="16" alt="Add User to Group" /></td><td align="center" valign="middle">Add User to Group</td>
+					</tr></table>
+					<br />
+				</div>
+			</td>
+		</tr>
+
+		</table>
+
+	</div>
+
+	<div id="usercontainer" <?php if (!$showuser){print("style=\"display:none\"");}?>>
+	<h3 align="center">User Administration</h3>
+
+	<form name="newuser" action="account_ldap.html" method="post">
+	<table cellpadding="0" cellspacing="0" border="0">
+	<tr><td width="100%"><div class="auth_config_head">Add new user</div></td></tr>
+	<tr>
+		<td align="center">
+			<div class="auth_config_body">
+			<br />
+			<table cellpadding="8" cellspacing="2" border="0">
+			<tr>
+				<td class="color_table_heading" align="right"><strong>Username:</strong></td>
+				<td class="color_table_row1"><input type="text" name="user" value="" /></td>
+			</tr>
+
+			<tr>
+				<td class="color_table_heading" align="right"><strong>Password:</strong></td>
+				<td class="color_table_row2"><input type="password" name="password" value="" /></td>
+			</tr>
+
+			<tr>
+				<td class="color_table_heading" align="right"><strong>Retype password:</strong></td>
+				<td class="color_table_row1"><input type="password" name="password2" value="" /></td>
+			</tr>
+
+			<tr>
+				<td class="color_table_heading" align="right"><strong>Primary Group:</strong></td>
+				<td class="color_table_row2">
+					<select name="gid">
+<?php
+
+foreach ($LDAPgrouparray as $ldapgroup)
+{
+	print("\t\t\t\t\t\t<option value=\"$ldapgroup[gid]\">$ldapgroup[gid]: $ldapgroup[name]</option>\n");
+}
+?>
+					</select>
+				</td>
+			</tr>
+			<tr>
+				<td class="color_table_heading">
+					Override automatic UID <input type="checkbox" name="chkUID" onclick="toggleUID()" />
+				</td>
+				<td class="color_table_row1">
+					&nbsp;
+				<div id="hiddenUID" style="visibility: hidden; display: none;">
+					UID Number:<br />
+					<input type="text" name="uid" value="" />
+				</div>
+				</td>
+			</tr>
+			<tr>
+				<td colspan="2" align="center">
+					<input type="hidden" name="action" value="add_usr" />
+					<input type="submit" name="submit" value="Add User" />&nbsp;&nbsp;&nbsp;
+					<input type="reset" value="Reset" />
+				</td>
+			</tr>
+			</table>
+			</div>
+		</td>
+	</tr>
+	</table>
+	</form>
+
+	<table cellpadding="0" cellspacing="0" border="0">
+	<tr><td width="100%"><div class="auth_config_head">User Control</div></td></tr>
+	<tr><td align="center">
+		<div class="auth_config_body">
+		<br />
+			<div style="border: 2px solid #ebebeb; width:100%; height:15em; text-align:left; background:white; overflow:auto; padding:4px;">
+			<table cellpadding="8" cellspacing="0" border="0" width="100%">
+	<?php
+		$i=0;
+		foreach ($LDAPuserarray as $ldapuser){
+			if ($i++ % 2)
+				print("\t\t\t<tr><td width=\"50\" align=\"right\">\n");
+			else
+				print("\t\t\t<tr bgcolor=\"#ebebeb\"><td width=\"50\" align=\"right\">\n");
+			print("\t\t\t\t<a href=\"#\" onclick=\"return !changepasswd('$ldapuser[name]', event);\"><img src=\"/images/icons/user_group_conf.png\" width=\"16\" height=\"16\" alt=\"Change Password\" /></a>\n");
+			print("\t\t\t\t<a href=\"#\" onclick=\"return !deleteuser('$ldapuser[name]', event);\"><img src=\"/images/icons/user_group_del.png\" width=\"16\" height=\"16\" alt=\"Delete User\" /></a></td>\n");
+			print("\t\t\t<td align=\"left\">$ldapuser[name] (uid: $ldapuser[uid])</td></tr>\n");
+		}
+	?>
+			</table>
+			&nbsp;</div><br/><table><tr><td align="center" valign="middle">
+		<img src="/images/icons/user_group_conf.png" width="16" height="16" alt="Change Password" /></td><td align="center" valign="middle">Change User Password&nbsp;&nbsp;&nbsp;</td>
+		<td align="center" valign="middle"><img src="/images/icons/user_group_del.png" width="16" height="16" alt="Delete User" /></td><td align="center" valign="middle">Delete User</td></tr></table>
+		</div>
+	</td></tr>
+	</table>
+	</div>
+	</td></tr></table>
+
+	<!-- BEGIN USER POPUPS-->
+	<div id="changepasswdpopup" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+	<form name="changepasswdpopup" action="account_ldap.html" method="post">
+	<table cellpadding="10" cellspacing="0" border="0" width="100%">
+	<tr>
+		<td>
+			<center><h3>Change User Password</h3></center>
+			Changing password for user: "<b><span style="display:inline" id="changepasswd_user">default</span></b>"<br /><br /><br />
+			Enter the new password below:<br />
+			<input type="password" name="passwd" value="" /><br /><br />
+			Enter the password again:<br />
+			<input type="password" name="passwd2" value="" /><br /><br />
+		</td>
+	</tr>
+	<tr>
+		<td align="center">
+			<input type="hidden" name="action" value="change_passwd" />
+			<input type="hidden" name="user" value="unknown" />
+			<input type="submit" value="Update Password" />&nbsp;&nbsp;&nbsp;
+			<input type="button" value="Cancel" onclick="hideCurrentPopup(); return false;"/>
+		</td>
+	</tr>
+	</table>
+	</form>
+	</div>
+
+	<div id="deleteuserpopup" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+	<form name="deleteuserpopup" action="account_ldap.html" method="post">
+	<table cellpadding="10" cellspacing="0" border="0" width="100%">
+	<tr>
+		<td>
+			<center><h3>Delete User</h3></center>
+			<b>Are you sure you want to permanently remove the user:</b> "<span style="display:inline" id="deleteuser_user">default</span>"?<br /><br />
+		</td>
+	</tr>
+	<tr>
+		<td align="center">
+			<input type="hidden" name="action" value="del_usr" />
+			<input type="hidden" name="user" value="unknown" />
+			<input type="submit" value="Delete User" />&nbsp;&nbsp;&nbsp;
+			<input type="button" value="Cancel" onclick="hideCurrentPopup(); return false;"/>
+		</td>
+	</tr>
+	</table>
+	</form>
+	</div>
+	<!-- FINISH USER POPUPS-->
+
+
+	<!-- BEGIN GROUP POPUPS-->
+
+	<div id="editgrouppopup" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+	<form name="editgrouppopup" action="account_ldap.html" method="post">
+	<table cellpadding="10" cellspacing="0" border="0" width="100%">
+	<tr>
+		<td>
+			<center><h3>Edit/Rename Group</h3></center>
+			Enter the new name for group "<div style="display:inline" id="editgroup_group">default</div>".<br />
+			<input type="text" name="newgroup" value="" /><br /><br />
+			<font color="red">Warning: changing the name of the group can affect permissions and group shares.</font><br /><br />
+		</td>
+
+	</tr>
+	<tr>
+		<td align="center">
+			<input type="hidden" name="action" value="edit_grp" />
+			<input type="hidden" name="group" value="unknown" />
+			<input type="submit" value="Edit Group" />
+			<input type="button" value="Cancel" onclick="hideCurrentPopup(); return false;"/>
+		</td>
+	</tr>
+	</table>
+	</form>
+	</div>
+
+	<div id="deletegrouppopup" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+	<form name="deletegrouppopup" action="account_ldap.html" method="post">
+	<table cellpadding="10" cellspacing="0" border="0" width="100%">
+	<tr>
+		<td>
+			<center><h3>Delete Group</h3></center>
+			Are you sure you want to permanently delete group "<div style="display:inline" id="deletegroup_group">default</div>"?
+		</td>
+	</tr>
+	<tr>
+		<td align="center">
+			<input type="hidden" name="action" value="del_grp" />
+			<input type="hidden" name="group" value="unknown" />
+			<input type="submit" value="Delete Group" />
+			<input type="button" value="Cancel" onclick="hideCurrentPopup(); return false;"/>
+		</td>
+	</tr>
+	</table>
+	</form>
+	</div>
+
+	<div id="addgroupuserpopup" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+	<form name="addgroupuserpopup" action="account_ldap.html" method="post">
+	<table cellpadding="10" cellspacing="0" border="0" width="100%">
+	<tr>
+		<td>
+			<center><h3>Add User to Group</h3></center>
+			Select the user to be added to group "<div style="display:inline" id="addgroupuser_group">default</div>":<br />
+			<select name="user" style="width=50%">
+<?php
+	foreach ($LDAPuserarray as $ldapuser){
+			print("\t\t\t\t<option value=\"$ldapuser[name]\">$ldapuser[name] (uid: $ldapuser[uid])</option>\n");
+	}
+
+?>
+			</select><br />
+		</td>
+	</tr>
+	<tr>
+		<td align="center">
+			<input type="hidden" name="action" value="add_grp_usr" />
+			<input type="hidden" name="group" value="unknown" />
+			<input type="submit" value="Add User" />
+			<input type="button" value="Cancel" onclick="hideCurrentPopup(); return false;"/>
+		</td>
+	</tr>
+	</table>
+	</form>
+	</div>
+
+	<div id="removegroupuserpopup" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+	<form name="removegroupuserpopup" action="account_ldap.html" method="post">
+	<table cellpadding="10" cellspacing="0" border="0" width="100%">
+	<tr>
+		<td>
+			<center><h3>Delete User from Group</h3></center>
+			Are you sure you want to remove<br />
+			user: <b><span style="display:inline" id="removegroupuser_name">user</span></b>
+			&nbsp;from group: <b><span style="display:inline" id="removegroupuser_group">group</span></b>?
+		</td>
+	</tr>
+	<tr>
+		<td align="center">
+			<input type="hidden" name="action" value="del_grp_usr" />
+			<input type="hidden" name="user" value="default" />
+			<input type="hidden" name="group" value="default" />
+			<input type="submit" value="Remove User" />
+			<input type="button" value="Cancel" onclick="hideCurrentPopup(); return false;"/>
+		</td>
+	</tr>
+	</table>
+	</form>
+	</div>
+	<!-- FINISH GROUP POPUPS-->
+
+	<br /><br />
+<?php
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>
+
+

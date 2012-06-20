@@ -1,0 +1,311 @@
+<?php
+
+/*
+ * General users section
+ *
+ * Copyright (C) 2006 Voluna Software. All rights reserved.
+ *
+ */
+
+	require("pre.inc");
+
+	if ($GLOBALS["userauthenticated"] == 0)
+	{
+		generic_header(array("title" => _("Your account")));
+		dual_begin(array());
+		print("<h2><a href=\"/\">" . _("Home") . "</a> / " . _("Your account") . "</h2>\n");
+		print("<p>" . _("You have not authenticated yourself to the system yet with your") . " <em>" . _("username") . "</em> " . _("and") . " <em>" . _("password") . "</em>. " .
+			_("You will not be able to use this section of the website without authenticating yourself first. So, please continue and login using the form on the right hand side.") . "</p>\n");
+		dual_middle(array());
+		show_account_details(array());
+		dual_end(array());
+		generic_footer(array());
+		exit;
+	}
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+
+	function volumes_startelement($parser, $name, $attrs)
+	{
+		global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg;
+
+		if ($name == "VOLUME")
+		{
+			array_push($volumes_id, $attrs["ID"]);
+			array_push($volumes_name, $attrs["NAME"]);
+			array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+			array_push($volumes_vg, $attrs["VG"]);
+		}
+	}
+
+	function volumes_endelement($parser, $name)
+	{
+	}
+
+	$volumes_parser = xml_parser_create();
+	xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+	$volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+	while ($volumes_data = fread($volumes_fp, 4096))
+		xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+	fclose($volumes_fp);
+	xml_parser_free($volumes_parser);
+
+	if (strlen($volume) <= 0)
+	{
+		$volume = $volumes_id[0];
+		$volume_vg = $volumes_vg[0];
+	}
+
+	if (isset($volumeinfo))
+	{
+		for ($i = 0; $i < count($volumes_name); $i++)
+			if ($volumeinfo == ("#!@-" . $volumes_id[$i] . "-#!@-" . $volumes_vg[$i] . "-#!@"))
+			{
+				$volume_mountpoint = $volumes_mountpoint[$i];
+				$volume_name = $volumes_name[$i];
+				$volume = $volumes_id[$i];
+				$volume_vg = $volumes_vg[$i];
+				break;
+			}
+	}
+	else
+	{
+		for ($i = 0; $i < count($volumes_name); $i++)
+			if (($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg))
+			{
+				$volume_mountpoint = $volumes_mountpoint[$i];
+				$volume_name = $volumes_name[$i];
+				break;
+			}
+	}
+
+	endpwent();
+
+	while ($user_info = getpwent())
+	{
+		if ($user_info["pw_name"] == $usercookie)
+			$user_uid = $user_info["pw_uid"];
+	}
+
+	endpwent();
+
+	$user_groups_gid = array();
+	$user_groups_name = array();
+
+	endgrent();
+
+	while ($group_info = getgrent())
+	{
+		if (in_array($usercookie, $group_info["gr_mem"]))
+		{
+			array_push($user_groups_gid, $group_info["gr_gid"]);
+			array_push($user_groups_name, $group_info["gr_name"]);
+		}
+	}
+
+	endgrent();
+
+	generic_header(array("title" => _("Your account")));
+	single_begin(array());
+	print("<h2><a href=\"/\">" . _("Home") . "</a> / " . _("Your account") . "</h2>\n");
+
+?>
+
+<p>Hi <?php print($usercookie); ?>! The following are your account information and preferences, arranged
+into tabs. Please click on a tab to open up that category.</p>
+
+<?php
+	tab_begin(4, 0, array("Quota", "Password", "Language", "Logout"), array("./", "password.html", "language.html", "logout.html"));
+?>
+	<h3 align="center">Select Volume</h3>
+	<p align="center">Select a volume below to bring up quota for that particular<br />
+	volume in the list below.</p>
+	<p align="center">
+	<form action="index.html" method="get">
+	<select name="volumeinfo">
+<?php
+	for ($i = 0; $i < count($volumes_name); $i++)
+		print("\t\t<option" . ((($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg)) ? " selected=\"selected\"" : "") . " value=\"" . htmlentities("#!@-" . $volumes_id[$i] . "-#!@-" . $volumes_vg[$i] . "-#!@") . "\">" . htmlentities($volumes_name[$i]) . " (group:" . htmlentities($volumes_vg[$i]) . " / volume:" . htmlentities($volumes_id[$i]) . ")</option>\n");
+?>
+	</select>&nbsp;<input type="submit" value="Change" />
+	</form>
+	</p>
+
+	<p>&nbsp;</p>
+
+	<hr />
+<?php
+			print("<h2>Volume - " . $volume_name . " (" . $volume_id . ")</h2>\n");
+
+			$user_quota = array();
+			$user_quotap = popen("/usr/bin/sudo /usr/sbin/repquota -v -n " . escapeshellarg($volume_mountpoint), "r");
+
+			while (!feof($user_quotap))
+			{
+				$string = trim(fgets($user_quotap, 4096), " ");
+				$strarray = explode(" ", $string);
+				$qarray = array();
+
+				foreach ($strarray as $strelement)
+				{
+					$element = trim($strelement);
+					if (strlen($element) == 0)
+						continue;
+					else
+						array_push($qarray, $element);
+				}
+
+				array_push($user_quota, $qarray);
+			}
+
+			pclose($user_quotap);
+
+			$group_quota = array();
+			$group_quotap = popen("/usr/bin/sudo /usr/sbin/repquota -v -g -n " . escapeshellarg($volume_mountpoint), "r");
+
+			while (!feof($group_quotap))
+			{
+				$string = trim(fgets($group_quotap, 4096), " ");
+
+				$strarray = explode(" ", $string);
+				$qarray = array();
+
+				foreach ($strarray as $strelement)
+				{
+					$element = trim($strelement);
+					if (strlen($element) == 0)
+						continue;
+					else
+						array_push($qarray, $element);
+				}
+
+				array_push($group_quota, $qarray);
+			}
+
+			pclose($group_quotap);
+
+			print("<h3>User quota</h3>\n");
+
+			$qfound = false;
+
+			for ($i = 0; $i < count($user_quota); $i++)
+			{
+				$qline = $user_quota[$i];
+				if ($qline[0] == "#" . $user_uid)
+				{
+					$qfound = true;
+					break;
+				}
+			}
+
+			if ($qfound == true)
+			{
+?>
+			<div align="center">
+			<table cellpadding="8" cellspacing="2" border="0">
+			<tr>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Total Space (blocks)</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Used Space (blocks)</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Free Space (blocks)</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Total Files</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Used Files</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Free Files</strong></td>
+			</tr>
+			<tr>
+				<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><?php print(intval($qline[3])); ?></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><?php print(intval($qline[2])); ?></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><?php print(((intval($qline[3]) > 0) ? (intval($qline[3]) - intval($qline[2])) : "N/A")); ?></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><?php print(intval($qline[7])); ?></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><?php print(intval($qline[6])); ?></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><?php print(((intval($qline[7]) > 0) ? (intval($qline[7]) - intval($qline[6])) : "N/A")); ?></td>
+			</tr>
+			</table>
+			</div>
+<?php
+			}
+			else
+			{
+				print("<p align=\"center\">No user quota has been configured on this volume for this user.</p>");
+			}
+
+			print("<h3>Group quota</h3>\n");
+?>
+			<table cellpadding="8" cellspacing="2" border="0">
+			<tr>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>GID</a></strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Group Name</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Total Space (blocks)</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Used Space (blocks)</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Free Space (blocks)</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Total Files</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Used Files</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Free Files</strong></td>
+			</tr>
+<?php
+
+			$dcolor = 0;
+
+			for ($i = 0; $i < count($user_groups_gid); $i++)
+			{
+				for ($p = 0; $p < count($group_quota); $p++)
+				{
+					$qline = $group_quota[$p];
+					if ($qline[0] == "#" . $user_groups_gid[$i])
+						break;
+					$qline = array();
+				}
+
+				if ($dcolor == 0)
+				{
+					$dcolor = 1;
+					$dvalue = $GLOBALS["color_table_row1"];
+				}
+				else
+				{
+					$dcolor = 0;
+					$dvalue = $GLOBALS["color_table_row2"];
+				}
+
+				print("<tr>\n");
+				print("\t<td valign=\"center\" bgcolor=\"" . $dvalue . "\" align=\"center\">" . htmlentities($user_groups_gid[$i]) . "</td>\n");
+				print("\t<td valign=\"center\" bgcolor=\"" . $dvalue . "\" align=\"center\">" . htmlentities($user_groups_name[$i]) . "</td>\n");
+
+				print("\t<td valign=\"center\" bgcolor=\"" . $dvalue . "\" align=\"center\">\n");
+				print("\t" . intval($qline[3]) . "\n");
+				print("\t</td>\n");
+
+				print("\t<td valign=\"center\" align=\"center\" bgcolor=\"" . (((intval($qline[3]) > 0) && (intval($qline[2]) > intval($qline[3]))) ? "#ff8080" : $dvalue) . "\">\n");
+				print("\t" . intval($qline[2]) . "\n");
+				print("\t</td>\n");
+
+				print("\t<td valign=\"center\" align=\"center\" bgcolor=\"" . (((intval($qline[3]) > 0) && ((intval($qline[3]) - intval($qline[2])) < 0)) ? "#ff8080" : $dvalue) . "\">\n");
+				print("\t" . ((intval($qline[3]) > 0) ? (intval($qline[3]) - intval($qline[2])) : "N/A") . "\n");
+				print("\t</td>\n");
+
+				print("\t<td valign=\"center\" bgcolor=\"" . $dvalue . "\" align=\"center\">\n");
+				print("\t" . intval($qline[7]) . "\n");
+				print("\t</td>\n");
+				print("\t<td valign=\"center\" align=\"center\" bgcolor=\"" . (((intval($qline[7]) > 0) && (intval($qline[6]) > intval($qline[7]))) ? "#ff8080" : $dvalue) . "\">\n");
+				print("\t" . intval($qline[6]) . "\n");
+				print("\t</td>\n");
+				print("\t<td valign=\"center\" align=\"center\" bgcolor=\"" . (((intval($qline[7]) > 0) && ((intval($qline[7]) - intval($qline[6])) < 0)) ? "#ff8080" : $dvalue) . "\">\n");
+				print("\t" . ((intval($qline[7]) > 0) ? (intval($qline[7]) - intval($qline[6])) : "N/A") . "\n");
+				print("\t</td>\n");
+
+				print("</tr>\n");
+			}
+?>
+			</table>
+
+			<p>&nbsp;</p>
+<?php
+	tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

@@ -1,0 +1,13 @@
+<formfields>
+    <field id="cable" name="cable" label="Cabletype" inputtype="select">
+        <option id="simpleapccable" name="simpleapccable" value="simple">simple</option>
+        <option id="940-0095B" name="940-0095B" value="940-0095B">940-0095B</option>
+    </field>
+    <field id="sdtype" name="sdtype" label="Shutdown Type" inputtype="select">
+        <option id="stype0" name="sdtype0" value="0">[0]: soft shutdown or powerdown</option>
+        <option id="stype1" name="sdtype1" value="1">[1]: soft shutdown followed by powerdown</option>
+        <option id="stype2" name="sdtype2" value="2">[2]: instant power off</option>
+        <option id="stype3" name="sdtype3" value="3">[3]: power off with grace period</option>
+        <option id="stype4" name="sdtype4" value="4">[4]:’force OB’ hack method for CS 350</option>
+    </field>
+</formfields>

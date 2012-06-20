@@ -1,0 +1,778 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    require("md.inc");
+    include("authenticated.inc");
+
+
+	$md = get_md();
+
+	$disksp = popen("export LANG=C; /usr/bin/sudo /opt/openfiler/sbin/list-disks.pl", "r");
+	$i = 0;
+	while (!feof($disksp))
+	{
+		$dstr = trim(fgets($disksp, 4096));
+		// $dresult[$i++] = substr($dstr, 0, strlen($dstr) - 1);
+		$dresult[$i++] = $dstr;
+	}
+	pclose($disksp);
+
+	$of_disks = array();
+
+	if ($dresult[0] == "OPENFILER")
+	{
+		$i = 1;
+
+		while ($i < count($dresult))
+		{
+			if (strncmp($dresult[$i], "DISK", 4) == 0)
+			{
+				$p = $i;
+				$i = $i + 8;
+
+				$parts = array();
+
+				while (($dresult[$i] == "PARTITION") && ($i < count($dresult)))
+				{
+					array_push($parts, array("device" => $dresult[$i + 1], "type" => $dresult[$i + 2], "number" => $dresult[$i + 3], "start" => $dresult[$i + 4], "end" => $dresult[$i + 5], "blocks" => $dresult[$i + 6], "extended" => $dresult[$i + 7]));
+					$i = $i + 8;
+				}
+
+				array_push($of_disks,
+					array("device" => $dresult[$p + 1],
+						"type" => $dresult[$p + 2],
+						"description" => $dresult[$p + 3],
+						"blocksize" => ($dresult[$p + 4] * 2),
+						"cylinders" => $dresult[$p + 5],
+						"heads" => $dresult[$p + 6],
+						"sectors" => $dresult[$p + 7],
+						"partitions" => $parts));
+			}
+			else
+				break;
+		}
+	}
+
+	$in_use = array();
+	$used_in_string = array();
+
+	for ($i = 0; $i < count($md); $i++)
+	{
+		$pv_device = $md[$i]["device"];
+
+		$in_use[$pv_device] = false;
+		$used_in_string[$pv_device] = "<em>Unknown / unused</em>";
+
+		$pvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "pvdisplay " . $pv_device, "r");
+		$pvstr = trim(fgets($pvp, 4096));
+		pclose($pvp);
+
+		if ((strcmp($pvstr, "--- Physical volume ---") == 0) || (strcmp($pvstr, "--- NEW Physical volume ---") == 0))
+		{
+			$pvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "pvdisplay -c " . $pv_device, "r");
+			$pvstr = trim(fgets($pvp, 4096));
+			pclose($pvp);
+
+			$pvinfo = explode(":", trim($pvstr, " "));
+
+			if (($pvinfo[0] == $pv_device) && (strlen($pvinfo[1]) > 0))
+			{
+				$in_use[$pv_device] = true;
+				$used_in_string[$pv_device] = "<tt>" . $pvinfo[1] . "</tt> VG";
+			}
+		}
+	}
+
+	$free_raid_partitions_exist = false;
+	$raid_partition_in_use = array();
+
+        for ($part_index = 0; $part_index < count($of_disks); $part_index++)
+        {
+		for ($j = 0; $j < count($of_disks[$part_index]["partitions"]); $j++)
+		{
+			$ptype = $of_disks[$part_index]["partitions"][$j]["type"];
+			$pv_device = $of_disks[$part_index]["partitions"][$j]["device"];
+
+			$raid_partition_in_use[$pv_device] = FALSE;
+
+			if ($ptype == "fd")
+			{
+				for ($ii = 0; $ii < count($md); $ii++)
+				{
+					for ($i = 0; $i < count($md[$ii]["members"]); $i++)
+					{
+						if ($md[$ii]["members"][$i]["device"] == $pv_device)
+						{
+							$raid_partition_in_use[$pv_device] = TRUE;
+							break;
+						}
+					}
+
+					if ($raid_partition_in_use[$pv_device])
+						break;
+				}
+
+				if (!$raid_partition_in_use[$pv_device])
+					$free_raid_partitions_exist = TRUE;
+			}
+		}
+	}
+
+	if (isset($action) && ($action == "removedevice"))
+	{
+		for ($i = 0; $i < count($md); $i++)
+		{
+			if ($md[$i]["device"] == $array)
+			{
+				for ($j = 0; $j < count($md[$i]["members"]); $j++)
+				{
+					if ($md[$i]["members"][$j]["device"] == $device)
+					{
+						if (($md[$i]["members"][$j]["state"] & 2) == 0){
+							exec("export LANG=C; /usr/bin/sudo /sbin/mdadm " . escapeshellarg($md[$i]["device"]) . " --remove " . escapeshellarg($md[$i]["members"][$j]["device"]));
+							exec("export LANG=C; /usr/bin/sudo /sbin/mdadm --zero-superblock " . escapeshellarg($md[$i]["members"][$j]["device"]));
+							exec("export LANG=C; /usr/bin/sudo /bin/dd if=/dev/zero of=" . escapeshellarg($md[$i]["members"][$j]["device"]) . " bs=1024 count=1 > /dev/null 2>/dev/null");
+						}
+						break;
+					}
+
+				}
+
+				break;
+			}
+		}
+
+		header("Location: ./volumes_raidmanage.html");
+		exit;
+	}
+	else if (isset($action) && ($action == "adddevices"))
+	{
+		for ($i = 0; $i < count($md); $i++)
+		{
+			if ($md[$i]["device"] == $array)
+			{
+			        for ($part_index = 0; $part_index < count($of_disks); $part_index++)
+				{
+					for ($j = 0; $j < count($of_disks[$part_index]["partitions"]); $j++)
+					{
+						$ptype = $of_disks[$part_index]["partitions"][$j]["type"];
+						$pv_device = $of_disks[$part_index]["partitions"][$j]["device"];
+
+						if (($ptype == "fd") && (!$raid_partition_in_use[$pv_device]) && (${"check" . sha1($pv_device)} == "on"))
+						{
+							exec("export LANG=C; /usr/bin/sudo /sbin/mdadm " . escapeshellarg($md[$i]["device"]) . " --add " . escapeshellarg($pv_device));
+						}
+					}
+				}
+
+				break;
+			}
+		}
+
+		header("Location: ./volumes_raidmanage.html");
+		exit;
+	}
+	else if (isset($action) && ($action == "deletearray"))
+	{
+		for ($i = 0; $i < count($md); $i++)
+		{
+			if ($md[$i]["device"] == $array)
+			{
+				if  (!$in_use[$array])
+				{
+					exec("export LANG=C; /usr/bin/sudo /sbin/mdadm --stop " . escapeshellarg($array));
+
+					for ($j = 0; $j < count($md[$i]["members"]); $j++)
+					{
+						exec("export LANG=C; /usr/bin/sudo /sbin/mdadm --zero-superblock " . escapeshellarg($md[$i]["members"][$j]["device"]));
+						exec("export LANG=C; /usr/bin/sudo /bin/dd if=/dev/zero of=" . escapeshellarg($md[$i]["members"][$j]["device"]) ." bs=1024k count=1 >/dev/null 2>/dev/null");
+					}
+					update_mdadm_conf();
+				}
+
+				break;
+			}
+		}
+
+		header("Location: ./volumes_raidmanage.html");
+		exit;
+	}
+	else if (isset($action) && ($action == "createarray"))
+	{
+		$member_devices = "";
+		$member_count = 0;
+		$spare_devices = "";
+		$spare_count = 0;
+		$chunk_size	= ${"chunksize"};
+		$devices_ok = TRUE;
+
+	        for ($part_index = 0; $part_index < count($of_disks); $part_index++)
+		{
+			for ($j = 0; $j < count($of_disks[$part_index]["partitions"]); $j++)
+			{
+				$ptype = $of_disks[$part_index]["partitions"][$j]["type"];
+				$pv_device = $of_disks[$part_index]["partitions"][$j]["device"];
+
+				if (($ptype == "fd") && (${"check" . sha1($pv_device)} == "on"))
+				{
+					if (!$raid_partition_in_use[$pv_device])
+					{
+						if (${"type" . sha1($pv_device)} == "member")
+						{
+							$member_devices .= " " . $pv_device;
+							$member_count++;
+						}
+						else
+						{
+							$spare_devices .= " " . $pv_device;
+							$spare_count++;
+						}
+					}
+					else
+						$devices_ok = FALSE;
+				}
+			}
+		}
+
+		if ($devices_ok && (
+			(($level == 0) && ($member_count >= 2)) ||
+			(($level == 1) && (($member_count % 2) == 0) && ($member_count > 0)) ||
+			(($level == 5) && ($member_count >= 3)) ||
+			(($level == 6) && ($member_count >= 4)) ||
+			(($level == 10) && (($member_count % 2) == 0) && ($member_count >= 4))
+			))
+		{
+			$found = FALSE;
+
+			for ($i = 0; $i < 256; $i++)
+			{
+				$found = FALSE;
+
+				for ($j = 0; $j < count($md); $j++)
+					if ($md[$j]["device"] == ("/dev/md" . $i))
+					{
+						$found = TRUE;
+						break;
+					}
+
+				if (!$found)
+					break;
+			}
+
+			if (!$found)
+			{
+
+				$zero_devices = split(" ", ltrim ($member_devices . $spare_devices));
+				foreach ( $zero_devices as $smd ) {
+					exec("export LANG=C; /usr/bin/sudo /sbin/mdadm --zero-superblock " . $smd ." > /dev/null 2> /dev/null");
+					exec("export LANG=C; /usr/bin/sudo /bin/dd if=/dev/zero of=" . $smd ." bs=1024k count=1 > /dev/null 2>/dev/null");
+				}
+
+
+				if ($spare_count > 0)
+					exec("export LANG=C; /usr/bin/sudo /sbin/mdadm --create --auto=md /dev/md" . $i . " --level=" . intval($level) . " --raid-devices=" . $member_count . " --spare-devices=" . $spare_count . " --chunk=". $chunk_size . " " . $member_devices . $spare_devices  ." > /tmp/out1 2> /tmp/out2");
+				else
+					exec("export LANG=C; /usr/bin/sudo /sbin/mdadm --create --auto=md /dev/md" . $i . " --level=" . intval($level). " --chunk=". $chunk_size . " " . " --raid-devices=" . $member_count . " " . $member_devices . " > /tmp/out1 2> /tmp/out2" );
+
+				sleep(2);	// Give a couple of seconds for the RAID device to become active
+
+				exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "pvcreate /dev/md" . $i . " > /tmp/out1 2> /tmp/out2");
+
+				update_mdadm_conf();
+			}
+		}
+
+		header("Location: ./volumes_raidmanage.html");
+		exit;
+	}
+
+	generic_header(array("title" => _("Volumes : RAID Management")));
+	single_begin(array());
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_VOLUME_RAID_MANAGE");
+	print("<h3 align=\"center\">Software RAID Management</h3>\n");
+
+	if (count($md) > 0)
+	{
+		if ($free_raid_partitions_exist)
+		{
+			for ($ii = 0; $ii < count($md); $ii++)
+			{
+				print("<form method=\"post\" action=\"volumes_raidmanage.html\">\n");
+				print("<input type=\"hidden\" name=\"action\" value=\"adddevices\" />\n");
+				print("<input type=\"hidden\" name=\"array\" value=\"" . $md[$ii]["device"] . "\" />\n");
+
+				print("<div id=\"add-popup-" . sha1($md[$ii]["device"]) . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"mdspopup\">\n");
+				print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+				print("<tr>\n");
+				print("\t<td colspan=\"3\" bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Select RAID partitions to add</strong></td>\n");
+				print("</tr>\n");
+
+				$dcolor = 0;
+
+				for ($i = 0; $i < count($of_disks); $i++)
+				{
+					for ($j = 0; $j < count($of_disks[$i]["partitions"]); $j++)
+					{
+						$ptype = $of_disks[$i]["partitions"][$j]["type"];
+						$pv_device = $of_disks[$i]["partitions"][$j]["device"];
+
+						$part_size = ($of_disks[$i]["blocksize"] * $of_disks[$i]["partitions"][$j]["blocks"]);
+
+						if (($ptype == "fd") && (!$raid_partition_in_use[$pv_device]) && ($part_size >= $md[$ii]["device_size"]))
+						{
+							if ($dcolor == 0)
+							{
+								$dcolor = 1;
+								$dvalue = $GLOBALS["color_table_row1"];
+							}
+							else
+							{
+								$dcolor = 0;
+								$dvalue = $GLOBALS["color_table_row2"];
+							}
+
+							$part_size = ($of_disks[$i]["blocksize"] * $of_disks[$i]["partitions"][$j]["blocks"]);
+
+							if ($part_size > (1024 * 1024 * 1024 * 1024.0))
+								$part_size_string = sprintf("%.02f TB", ($part_size / (1024 * 1024 * 1024.0 * 1024.0)));
+							else if ($part_size > (1024 * 1024 * 1024 ))
+                                                                $part_size_string = sprintf("%.02f GB", ($part_size / (1024 * 1024 * 1024.0)));
+							else if ($part_size > (1024 * 1024))
+								$part_size_string = sprintf("%.02f MB", ($part_size / (1024 * 1024.0)));
+							else if ($part_size > (1024))
+								$part_size_string = sprintf("%.02f KB", ($part_size / (1024.0)));
+							else
+								$part_size_string = $part_size . " bytes";
+
+							print("<tr>\n");
+							print("<td bgcolor=\"" . $dvalue . "\" align=\"left\"><input type=\"checkbox\" name=\"check" . sha1($pv_device) . "\" /></td>\n");
+							print("<td bgcolor=\"" . $dvalue . "\" align=\"left\">" . $pv_device . "</td>\n");
+							print("<td bgcolor=\"" . $dvalue . "\" align=\"left\">" . $part_size_string . "</td>\n");
+							print("</tr>\n");
+						}
+					}
+				}
+
+				print("<tr>\n");
+				print("\t<td colspan=\"3\" bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><input type=\"submit\" value=\"Submit\" /></td>\n");
+				print("</tr>\n");
+				print("</table>\n");
+
+				print("<p align=\"center\"><a href=\"#\" onclick=\"hideCurrentPopup(); return false;\">Close Window</a></p>\n");
+
+				print("</div>\n");
+				print("</form>\n");
+			}
+		}
+
+		for ($ii = 0; $ii < count($md); $ii++)
+		{
+			print("<div id=\"view-popup-" . htmlentities(sha1($md[$ii]["device"])) . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"mdspopup\">\n");
+			print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+			print("<tr>\n");
+			print("\t<td colspan=\"8\" bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Member devices of array &ldquo;" . htmlentities($md[$ii]["device"]) . "&rdquo; : RAID-" . $md[$ii]["level"] . "</strong></td>\n");
+			print("</tr>\n");
+			print("<tr>\n");
+			print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Number</strong></td>\n");
+			print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Member</strong></td>\n");
+			print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\"><strong>Device</strong></td>\n");
+			print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Faulty</strong></td>\n");
+			print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Active</strong></td>\n");
+			print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Synchronized</strong></td>\n");
+			print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Spare</strong></td>\n");
+			print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Remove</strong></td>\n");
+			print("</tr>\n");
+
+			$dcolor = 0;
+
+			for ($i = 0; $i < count($md[$ii]["members"]); $i++)
+			{
+				if ($dcolor == 0)
+				{
+					$dcolor = 1;
+					$dvalue = $GLOBALS["color_table_row1"];
+				}
+				else
+				{
+					$dcolor = 0;
+					$dvalue = $GLOBALS["color_table_row2"];
+				}
+
+				print("<tr>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $md[$ii]["members"][$i]["number"] . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $md[$ii]["members"][$i]["member"] . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"left\">" . $md[$ii]["members"][$i]["device"] . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . (($md[$ii]["members"][$i]["state"] & 1) ? "YES" : "NO"). "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . (($md[$ii]["members"][$i]["state"] & 2) ? "YES" : "NO"). "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . (($md[$ii]["members"][$i]["state"] & 4) ? "YES" : "NO"). "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . (($md[$ii]["members"][$i]["state"] == 0) ? "YES" : "NO"). "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">");
+
+				if (($md[$ii]["members"][$i]["state"] & 2) == 0)
+				{
+					if (strlen($md[$ii]["members"][$i]["device"]) > 0)
+					{
+						if ($md[$ii]["active_disks"] < $md[$ii]["raid_disks"])
+							print("Being used");
+						else
+							print("<a href=\"volumes_raidmanage.html?action=removedevice&amp;array=" . $md[$ii]["device"] . "&amp;device=" . $md[$ii]["members"][$i]["device"] . "\">Remove</a>");
+					}
+					else if ($md[$ii]["members"][$i]["state"] & 8)
+						print("Removed");
+					else
+						print("<em>Unknown state</em>");
+				}
+				else
+				{
+					print("Member");
+				}
+
+				print("</td>\n");
+				print("</tr>\n");
+			}
+
+			print("</table>\n");
+			print("<p align=\"center\"><a href=\"#\" onclick=\"hideCurrentPopup(); return false;\">Close Window</a></p>\n");
+			print("</div>\n");
+		}
+
+		print("<div align=\"center\">\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+		print("<tr>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Array</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Level</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Array Size</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Device Size</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>State</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Synchronization</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Manage</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Add</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Used In</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Delete</strong></td>\n");
+		print("</tr>\n");
+
+		$dcolor = 0;
+
+		for ($i = 0; $i < count($md); $i++)
+		{
+			if ($dcolor == 0)
+			{
+				$dcolor = 1;
+				$dvalue = $GLOBALS["color_table_row1"];
+			}
+			else
+			{
+				$dcolor = 0;
+				$dvalue = $GLOBALS["color_table_row2"];
+			}
+
+			print("<tr>\n");
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"left\">" . htmlentities($md[$i]["device"]) . "</td>\n");
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">RAID-" . $md[$i]["level"] . "</td>\n");
+			$part_size = $md[$i]["array_size"];
+
+			if ($part_size > (1024 * 1024 * 1024 * 1024))
+				 $part_size_string = sprintf("%.02f TB", ($part_size / (1024 * 1024 * 1024.0 * 1024.0)));
+			else if ($part_size > (1024 * 1024 * 1024))
+				$part_size_string = sprintf("%.02f GB", ($part_size / (1024 * 1024 * 1024.0)));
+			else if ($part_size > (1024 * 1024))
+				$part_size_string = sprintf("%.02f MB", ($part_size / (1024 * 1024.0)));
+			else if ($part_size > (1024))
+				$part_size_string = sprintf("%.02f KB", ($part_size / (1024.0)));
+			else
+				$part_size_string = $part_size . " bytes";
+
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $part_size_string . "</td>\n");
+
+			$part_size = $md[$i]["device_size"];
+
+			if ($part_size > (1024 * 1024 * 1024 * 1024))
+                                $part_size_string = sprintf("%.02f TB", ($part_size / (1024 * 1024 * 1024.0 * 1024.0)));
+			else if ($part_size > (1024 * 1024 * 1024))
+				$part_size_string = sprintf("%.02f GB", ($part_size / (1024 * 1024 * 1024.0)));
+			else if ($part_size > (1024 * 1024))
+				$part_size_string = sprintf("%.02f MB", ($part_size / (1024 * 1024.0)));
+			else if ($part_size > (1024))
+				$part_size_string = sprintf("%.02f KB", ($part_size / (1024.0)));
+			else
+				$part_size_string = $part_size . " bytes";
+
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $part_size_string . "</td>\n");
+
+			$dvalue_tmp = $dvalue;
+
+			$sync_string = "Synchronized";
+
+			if ($md[$i]["state"] & 1)
+				$state_string = "Clean";
+			else
+				$state_string = "Active";
+
+			if ($md[$i]["active_disks"] < $md[$i]["raid_disks"])
+			{
+				$state_string = $state_string . " &amp; degraded";
+				$dvalue = "orange";
+				$sync_string = "Not started";
+			}
+
+			if ($md[$i]["rebuild_percent"] > 0)
+			{
+				if ($md[$i]["resync"])
+					$state_string = $state_string . " &amp; resyncing";
+				else
+					$state_string = $state_string . " &amp; recovering";
+			}
+
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $state_string . "</td>\n");
+
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . (($md[$i]["rebuild_percent"] > 0) ? "Progressing (" . $md[$i]["rebuild_percent"] . "%)" : $sync_string) . "</td>\n");
+
+			$dvalue = $dvalue_tmp;
+
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"left\"><a href=\"#\" onclick=\"return !showPopup('view-popup-" . htmlentities(sha1($md[$i]["device"])) . "', event);\">View members</a></td>\n");
+
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">");
+
+			if ($free_raid_partitions_exist)
+				print("<a href=\"#\" onclick=\"return !showPopup('add-popup-" . sha1($md[$i]["device"]) . "', event);\">Add members</a>");
+			else
+				print("<em>All RAID partitions are used</em>\n");
+
+			print("</td>\n");
+
+			print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $used_in_string[$md[$i]["device"]] . "</td>\n");
+
+			if ($in_use[$md[$i]["device"]])
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\"><em>In use</em></td>\n");
+			else
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\"><a href=\"volumes_raidmanage.html?action=deletearray&amp;array=" . htmlentities($md[$i]["device"]) . "\">Delete</a></td>\n");
+
+			print("</tr>\n");
+		}
+
+		print("</table>\n");
+		print("</div>\n");
+	}
+	else
+		printMessageBlock("warning", "<p align=\"center\"><em>No existing RAID arrays were found.</em></p>\n");
+
+	print("<p align=\"center\">&nbsp;</p>\n");
+
+	print("<hr />\n");
+
+	print("<h3 align=\"center\">Create a new RAID array</h3>\n");
+
+	if ($free_raid_partitions_exist)
+	{
+		print("<p align=\"center\">");
+		print("Please note that RAID-0 arrays need atleast 2 member devices;<br />");
+		print("RAID-1 array members need to be multiples of 2;<br />");
+		print("RAID-5 arrays need atleast 3 member devices;<br />");
+		print("RAID-6 arrays need atleast 4 member devices;<br />");
+		print("RAID-10 arrays need atleast 4 member devices and need to be multiples of 2.");
+		print("</p>\n");
+
+?>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+
+function add_changed()
+{
+	members = 0;
+	spares = 0;
+
+<?php
+	for ($i = 0; $i < count($of_disks); $i++)
+	{
+		for ($j = 0; $j < count($of_disks[$i]["partitions"]); $j++)
+		{
+			$ptype = $of_disks[$i]["partitions"][$j]["type"];
+			$pv_device = $of_disks[$i]["partitions"][$j]["device"];
+
+			if (($ptype == "fd") && (!$raid_partition_in_use[$pv_device]))
+			{
+				print("\tif (document.addarrayform.check" . sha1($pv_device) . ".checked)\n");
+				print("\t{\n");
+
+				print("\t\tif (document.addarrayform.type" . sha1($pv_device) . "[0].checked)\n");
+				print("\t\t\tmembers++;\n");
+				print("\t\telse\n");
+				print("\t\t\tspares++;\n");
+
+				print("\t}\n\n");
+			}
+		}
+	}
+?>
+	if ((parseInt(document.addarrayform.level.value) == 0) && (members >= 2))
+		document.addarrayform.addsubmit.disabled = false;
+	else if ((parseInt(document.addarrayform.level.value) == 1) && ((members % 2) == 0) && (members > 0))
+		document.addarrayform.addsubmit.disabled = false;
+	else if ((parseInt(document.addarrayform.level.value) == 5) && (members >= 3))
+		document.addarrayform.addsubmit.disabled = false;
+	else if ((parseInt(document.addarrayform.level.value) == 6) && (members >= 4))
+		document.addarrayform.addsubmit.disabled = false;
+	else if ((parseInt(document.addarrayform.level.value) == 10) && ((members % 2) == 0) && (members >= 4))
+		document.addarrayform.addsubmit.disabled = false;
+	else
+		document.addarrayform.addsubmit.disabled = true;
+}
+
+// -->
+</script>
+
+<?php
+		print("<form name=\"addarrayform\" method=\"post\" action=\"volumes_raidmanage.html\">\n");
+		print("<input type=\"hidden\" name=\"action\" value=\"createarray\" />\n");
+
+		print("<div align=\"center\">\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+		print("<tr>\n");
+		print("\t<td colspan=\"4\" bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Select RAID array type</strong></td>\n");
+	        print("\t<td colspan=\"1\" bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Select chunk size</strong></td>\n");
+		print("</tr>\n");
+
+		print("<tr>\n");
+		print("\t<td colspan=\"4\" bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\">\n");
+		print("\t<select onchange=\"add_changed()\" name=\"level\">\n");
+		print("\t\t<option value=\"0\">RAID-0 (striped)</option>\n");
+		print("\t\t<option value=\"1\">RAID-1 (mirrored)</option>\n");
+		print("\t\t<option value=\"5\">RAID-5 (parity)</option>\n");
+		print("\t\t<option value=\"6\">RAID-6 (extra-parity)</option>\n");
+		print("\t\t<option value=\"10\">RAID-10 (mirrored + striped)</option>\n");
+		print("\t</select>\n");
+		print("</td>\n<center>chunk size</center>");
+
+                print("\t<td colspan=\"1\" bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\">\n");
+                print("\t<select onchange=\"add_changed()\" name=\"chunksize\">\n");
+                print("\t\t<option value=\"4\">4 kB</option>\n");
+                print("\t\t<option value=\"8\">8 kB</option>\n");
+                print("\t\t<option value=\"16\">16 kB</option>\n");
+                print("\t\t<option value=\"32\">32 kB</option>\n");
+                print("\t\t<option value=\"64\" selected >64 kB</option>\n");
+                print("\t\t<option value=\"128\">128 kB</option>\n");
+                print("\t\t<option value=\"256\">256 kB</option>\n");
+                print("\t\t<option value=\"512\">512 kB</option>\n");
+                print("\t\t<option value=\"1024\">1M </option>\n");
+                print("\t\t<option value=\"2048\">2M</option>\n");
+                print("\t\t<option value=\"4096\">4M</option>\n");
+                print("\t</select>\n");
+                print("</td>\n");
+
+		print("</tr>\n");
+
+		print("<tr>\n");
+		print("\t<td colspan=\"5\" bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Select RAID devices to add</strong></td>\n");
+		print("</tr>\n");
+		print("<tr>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>X</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\"><strong>Device</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\"><strong>Size</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Member</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Spare</strong></td>\n");
+		print("</tr>\n");
+
+		$dcolor = 0;
+
+		for ($i = 0; $i < count($of_disks); $i++)
+		{
+			for ($j = 0; $j < count($of_disks[$i]["partitions"]); $j++)
+			{
+				$ptype = $of_disks[$i]["partitions"][$j]["type"];
+				$pv_device = $of_disks[$i]["partitions"][$j]["device"];
+
+				if (($ptype == "fd") && (!$raid_partition_in_use[$pv_device]))
+				{
+					if ($dcolor == 0)
+					{
+						$dcolor = 1;
+						$dvalue = $GLOBALS["color_table_row1"];
+					}
+					else
+					{
+						$dcolor = 0;
+						$dvalue = $GLOBALS["color_table_row2"];
+					}
+
+					$part_size = ($of_disks[$i]["blocksize"] * $of_disks[$i]["partitions"][$j]["blocks"]);
+					if ($part_size > (1024 * 1024 * 1024 * 1024))
+                                                $part_size_string = sprintf("%.02f TB", ($part_size / (1024 * 1024 * 1024.0 * 1024.0)));
+					else if ($part_size > (1024 * 1024 * 1024))
+						$part_size_string = sprintf("%.02f GB", ($part_size / (1024 * 1024 * 1024.0)));
+					else if ($part_size > (1024 * 1024))
+						$part_size_string = sprintf("%.02f MB", ($part_size / (1024 * 1024.0)));
+					else if ($part_size > (1024))
+						$part_size_string = sprintf("%.02f KB", ($part_size / (1024.0)));
+					else
+						$part_size_string = $part_size . " bytes";
+
+					print("<tr>\n");
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"left\"><input type=\"checkbox\" name=\"check" . sha1($pv_device) . "\" onclick=\"add_changed()\" /></td>\n");
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"left\">" . $pv_device . "</td>\n");
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"left\">" . $part_size_string . "</td>\n");
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"type" . sha1($pv_device) . "\" onclick=\"add_changed()\" value=\"member\" checked=\"checked\" /></td>\n");
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"type" . sha1($pv_device) . "\" onclick=\"add_changed()\" value=\"spare\" /></td>\n");
+					print("</tr>\n");
+				}
+			}
+		}
+
+		print("<tr>\n");
+		print("\t<td colspan=\"5\" bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><input type=\"submit\" name=\"addsubmit\" value=\"Add array\" disabled=\"disabled\" /></td>\n");
+		print("</tr>\n");
+
+		print("</table>\n");
+		print("</div>\n");
+
+		print("</form>\n");
+
+	}
+	else
+		printMessageBlock("warning", "<p align=\"center\"><em>No existing RAID partitions were found, or all existing RAID partitions are used. You can <a href=\"volumes_physical.html\">create new RAID partitions</a>.</em></p>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

@@ -1,0 +1,26 @@
+H1 {
+  font-size: 20px;
+}
+table
+{
+  border: none;
+  margin: 0px;
+  padding: 0px;
+}
+table.box {
+  color: #fefefe;
+  background-color: #486591;
+  border: none;
+  padding: 1px;
+  width: 100%;
+}
+tr.boxheader {
+  background-color: #486591;
+}
+td.boxheader {
+  text-align: center;
+}
+tr.boxbody {
+  color: #fefefe;
+  background-color: #e6e6e6;
+}

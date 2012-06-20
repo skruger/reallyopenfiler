@@ -1,0 +1,957 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+	require_once("file.inc");
+	include("authenticated.inc");
+	require_once("authconfig.inc.php"); 
+
+	$authobj = new Authconfig(); 
+
+	$serverstring = "";
+	$netbiosname = "";
+	$winsserver = "";
+	$idmapsync = "nosync";
+	$noidmapsync = FALSE;
+	$ldapidmapsync = FALSE;
+	$adidmapsync = FALSE;   
+	$ldapidmaptls = FALSE;
+	$ldapidmapserver = "";
+	$ldapidmapsuffix = "";
+        $homesvolume_vg = "";
+        $homesvolume_lv = "";
+        $homesvolume_mountpoint = "";
+	$encryptedpasswords = 1;
+	$ldapusersuffix = "";
+        $ldapgroupsuffix = "";
+        $winbindseparator = "";
+        $doscharset = "";
+        $unixcharset = "";
+        $displaycharset = "";
+
+	$IDMAP_AD_FILE = "/opt/openfiler/etc/idmap_ad.xml"; 
+	$idmap_adDoc = new XmlHandler($IDMAP_AD_FILE);
+	$xPath = "//idmap_ad/option";
+	$adOptions = $idmap_adDoc->runXpathQuery($xPath); 
+
+
+	function smb_startelement($parser, $name, $attrs)
+	{
+            global $serverstring;
+            global $netbiosname;
+            global $winsserver;
+            global $idmapsync;
+            global $noidmapsync;
+            global $ldapidmapsync;
+            global $adidmapsync;
+            global $ldapidmaptls;
+            global $ldapidmapserver;
+            global $ldapidmapsuffix;
+            global $homesvolume_vg;
+            global $homesvolume_lv;
+            global $homesvolume_mountpoint;
+            global $encryptedpasswords;
+            global $ldapusersuffix;
+            global $ldapgroupsuffix;
+            global $doscharset;
+            global $unixcharset;
+            global $displaycharset;
+            global $snapshothomes;
+            global $defaultdomain;
+            global $winbindseparator;
+
+            if ($name == "SERVERSTRING")
+                    $serverstring = $attrs["VALUE"];
+            else if ($name == "NETBIOSNAME")
+                    $netbiosname = $attrs["VALUE"];
+            else if ($name == "WINSSERVER")
+                    $winsserver = $attrs["VALUE"];
+            else if ($name == "IDMAPSYNC") {
+                        
+			$localval = $attrs["VALUE"]; 
+
+			if (strcmp($localval, "ldap") == 0) {
+				$idmapsync = "ldap"; 
+                                $ldapidmapsync = TRUE;
+			}
+			else if (strcmp($localval, "ad") == 0) {
+				$idmapsync = "ad";
+				$adidmapsync = TRUE;
+			}
+			
+			else {
+				$idmapsync = "nosync"; 
+				$noidmapsync = TRUE;
+			}
+			
+            }
+
+            else if ($name == "LDAPIDMAPTLS")
+                    $ldapidmaptls = ($attrs["VALUE"] == "on") ? TRUE : FALSE;
+            else if ($name == "LDAPIDMAPSERVER")
+            {
+                    $ldapidmapserver = $attrs["VALUE"];
+
+                    if (strlen($ldapidmapserver) == 0)
+                            $ldapidmapserver = "127.0.0.1";
+            }
+            else if ($name == "LDAPIDMAPSUFFIX")
+            {
+                    $ldapidmapsuffix = $attrs["VALUE"];
+
+                    if (strlen($ldapidmapsuffix) == 0)
+                            $ldapidmapsuffix = "ou=Idmap";
+            }
+            else if ($name == "HOMESVOLUME")
+            {
+                    $homesvolume_vg = $attrs["VG"];
+                    $homesvolume_lv = $attrs["LV"];
+                    $homesvolume_mountpoint = $attrs["MOUNTPOINT"];
+            }
+            else if ($name == "ENCRYPTEDPASSWORDS")
+                    $encryptedpasswords = ($attrs["VALUE"] == "on");
+            else if ($name == "LDAPUSERSUFFIX")
+            {
+                    $ldapusersuffix = $attrs["VALUE"];
+
+                    if(strlen($ldapusersuffix) == 0)
+                            $ldapusersuffix = "ou=People";
+            }
+
+            else if ($name == "LDAPGROUPSUFFIX")
+            {
+                $ldapgroupsuffix = $attrs["VALUE"];
+
+                if(strlen($ldapgroupsuffix) == 0)
+                        $ldapgroupsuffix = "ou=Group";
+            }
+
+            else if ($name == "DOSCHARSET")
+                $doscharset = $attrs["VALUE"];
+
+            else if ($name == "UNIXCHARSET")
+                $unixcharset = $attrs["VALUE"];
+
+            else if ($name == "DISPLAYCHARSET")
+                $displaycharset = $attrs["VALUE"];
+
+            else if ($name == "SNAPSHOTHOMES")
+                $snapshothomes = $attrs["VALUE"];
+
+            else if ($name == "WINBINDPOLICY")
+                $defaultdomain = $attrs["VALUE"];
+            else if ($name == "WINBINDSEPARATOR")
+                $winbindseparator = $attrs["VALUE"];
+
+
+	}
+
+	function smb_endelement($parser, $name)
+	{
+	}
+
+	$smb_parser = xml_parser_create();
+	xml_set_element_handler($smb_parser, "smb_startelement", "smb_endelement");
+	$smb_fp = fopen("/opt/openfiler/etc/smb_settings.xml", "r");
+
+	while ($smb_data = fread($smb_fp, 4096))
+		xml_parse($smb_parser, $smb_data, feof($smb_fp));
+
+	fclose($smb_fp);
+	xml_parser_free($smb_parser);
+
+	global $ldap_usersetpw;
+	global $ldap_localserver;
+	global $ldap_smb_login;
+
+	function ldap_startelement($parser, $name, $attrs)
+	{
+		global $ldap_usersetpw;
+		global $ldap_localserver;
+		global $ldap_smb_login;
+		if ($name == "USER-PASSWORD")
+			$ldap_usersetpw = $attrs["VALUE"];
+		if ($name == "LOCAL-SERVER")
+			$ldap_localserver = $attrs["VALUE"];
+		if ($name == "SAMBA-LOGIN")
+			$ldap_smb_login = $attrs["VALUE"];
+	}
+	function ldap_endelement($parser, $name){};
+
+	$ldap_parser = xml_parser_create();
+	xml_set_element_handler($ldap_parser, "ldap_startelement", "ldap_endelement");
+	$ldap_fp = fopen("/opt/openfiler/etc/ldap.xml", "r");
+
+	while ($ldap_data = fread($ldap_fp, 4096))
+		xml_parse($ldap_parser, $ldap_data, feof($ldap_fp));
+
+	fclose($ldap_fp);
+	xml_parser_free($ldap_parser);
+
+
+
+if (count($_POST) > 0)
+{
+    $file = new File("/opt/openfiler/etc/smb_settings.xml");
+
+    $file->AddLine("<?xml version=\"1.0\" ?>");
+    $file->AddLine("<smb>");
+    $file->AddLine("\t<serverstring value=\"" . htmlentities($serverstring) . "\" />");
+    $file->AddLine("\t<netbiosname value=\"" . htmlentities($netbiosname) . "\" />");
+    $file->AddLine("\t<winsserver value=\"" . htmlentities($winsserver) . "\" />");
+    $file->AddLine("\t<idmapsync value=\"" . $newidmapsync . "\" />");
+    $file->AddLine("\t<ldapidmaptls value=\"" . (($newldapidmaptls == "on") ? "on" : "off") . "\" />");
+    $file->AddLine("\t<ldapidmapserver value=\"" . htmlentities($newldapidmapserver) . "\" />");
+    $file->AddLine("\t<ldapidmapsuffix value=\"" . htmlentities($newldapidmapsuffix) . "\" />");
+    /*$file->AddLine("\t<homesvolume vg=\"" . htmlentities($homesvolume_vg) . "\" lv=\"" . htmlentities($homesvolume_lv) . "\" mountpoint=\"" . htmlentities($homesvolume_mountpoint) . "\" />");*/
+    $file->AddLine("\t<encryptedpasswords value=\"" . (($encryptedpasswords) ? "on" : "off") . "\" />");
+    $file->AddLine("\t<ldapusersuffix value=\"" . htmlentities($ldapusersuffix) . "\" />");
+    $file->AddLine("\t<ldapgroupsuffix value=\"" . htmlentities($ldapgroupsuffix) . "\" />");
+    $file->AddLine("\t<doscharset value=\"" . htmlentities($doscharset) . "\" />");
+    $file->AddLine("\t<unixcharset value=\"" . htmlentities($unixcharset) . "\" />");
+    $file->AddLine("\t<displaycharset value=\"" . htmlentities($displaycharset) . "\" />");
+    $file->AddLine("\t<winbindpolicy value=\"" . htmlentities($defaultdomain) . "\" />");
+    $file->AddLine("\t<winbindseparator value=\"" . $winbindseparator . "\" />");
+    $file->AddLine("</smb>");
+
+    $file->Save();
+
+    $file = new File("/opt/openfiler/etc/ldap.xml");
+    $file->AddLine("<?xml version=\"1.0\" ?>");
+    $file->AddLine("<ldap>");
+    $file->AddLine("\t<user-password value=\"" . (htmlentities($usersetpw == "on") ? "YES" : "NO") . "\" />");
+    $file->AddLine("\t<local-server value=\"" . (htmlentities($localldap == "on") ? "YES" : "NO") . "\" />");
+    $file->AddLine("\t<samba-login value=\"" . (htmlentities($smb_login == "on") ? "YES" : "NO") . "\" />");
+    $file->AddLine("</ldap>");
+    $file->Save();
+
+	
+	
+    $authconfigcommand = "";
+	$authconfig_enabled_ldap_command = ""; 
+	$authconfig_disabled_ldap_command = "";
+
+    if (strlen($_POST["usenis"]) > 0)
+    {
+            if (strcasecmp($_POST["usenis"], "on") == 0)
+                    $authconfigcommand .= " --enablenis --nisdomain=\"" . $_POST["nisdomain"] . "\" --nisserver=\"" . $_POST["nisserver"] . "\"";
+    }
+    else
+            $authconfigcommand .= " --disablenis";
+
+    if (strlen($_POST["useldap"]) > 0)
+    {
+            if (strcasecmp($_POST["useldap"], "on") == 0)
+                    $authconfig_enabled_ldap_command .= " --enableldap --ldapserver=\"" . $_POST["ldapserver"] . "\" --ldapbasedn=\"" .  
+					$_POST["ldapbasedn"] . "\" --ldapbinddn=\"" . $_POST["ldapbinddn"] . "\" --ldapbindpw='" . $_POST["ldapbindpw"] . 
+					"' --ldaprootbinddn=\"" . $_POST["ldaprootbinddn"] . "\" --ldaprootbindpw='" . $_POST["ldaprootbindpw"] . "'";
+    }
+    else
+    {
+		$authconfig_disabled_ldap_command .= " --disableldap --disableldapauth"; 
+
+	}
+
+    if (strlen($_POST["ldaptls"]) > 0)
+    {
+            if (strcasecmp($_POST["ldaptls"], "on") == 0)
+                    $authconfig_enabled_ldap_command .= " --enableldaptls";
+    }
+    else
+            $authconfig_disabled_ldap_command .= " --disableldaptls";
+
+    if (strlen($_POST["useldapauth"]) > 0)
+    {
+            if (strcasecmp($_POST["useldapauth"], "on") == 0)
+                    $authconfig_enabled_ldap_command .= " --enableldapauth";
+    }
+    else
+            $authconfig_disabled_ldap_command .= " --disableldapauth";
+
+    if (strlen($_POST["usehesiod"]) > 0)
+    {
+            if (strcasecmp($_POST["usehesiod"], "on") == 0)
+                    $authconfigcommand .= " --enablehesiod --hesiodlhs=\"" . $_POST["hesiodlhs"] . "\" --hesiodrhs=\"" . $_POST["hesiodrhs"] . "\"";
+    }
+    else
+            $authconfigcommand .= " --disablehesiod";
+
+    if (strlen($_POST["winbinddomain"]) > 0)
+    {
+            $authconfigcommand .= " --smbworkgroup=\"" . $_POST["winbinddomain"] . "\"";
+    }
+
+    if (strlen($_POST["usewinbind"]) > 0)
+    { 
+            if (strcasecmp($_POST["usewinbind"], "on") == 0) {
+                    $authconfigcommand .= " --enablewinbind --enablewinbindauth --winbindseparator=+ --winbindtemplateshell=/sbin/nologin --smbsecurity=" . 
+					$_POST["winbindtype"] . " --smbservers=\"" . $_POST["winbindcontrollers"] . "\" --smbrealm=\"" . 
+					$_POST["winbindrealm"] . "\" --smbidmapuid=\"" . $_POST["winbinduidrange"] . "\" --smbidmapgid=\"" . $_POST["winbindgidrange"] . "\"";
+			
+				if (strcasecmp($_POST["winbindjoin"], "on") == 0) 
+					$authconfigcommand .= " --winbindjoin=" . escapeshellarg($_POST["winbindadminusername"]) . "%" . escapeshellarg($_POST["winbindadminpassword"]); 
+				
+			}
+	}
+
+	else
+            $authconfigcommand .= " --disablewinbindauth --disablewinbind";
+
+	// shadow passwords must never be disabled
+	$authconfigcommand .= " --enableshadow --enablemd5"; 
+
+
+    if (strlen($_POST["usekerberos"]) > 0)
+    {
+            if (strcasecmp($_POST["usekerberos"], "on") == 0)
+                    $authconfigcommand .= " --enablekrb5 --krb5realm=\"" . $_POST["krbrealm"] . "\" --krb5kdc=\"" . $_POST["krbkdc"] . "\" --krb5adminserver=\"" . $_POST["krbadminserver"] . "\"";
+    }
+    else
+            $authconfigcommand .= " --disablekrb5";
+
+
+
+    if ($localldap == "on"){
+            if (!$ldapbasedn || !$ldaprootbinddn || !$ldaprootbindpw)
+                    $error[] = "Local LDAP server requires the following: Base DN, Root bind DN, Root bind password";
+
+            $ldap = new LDAPServer($ldapbasedn, $ldaprootbinddn, $ldaprootbindpw);
+            $ldap->Create($error);
+			$authconfigcommand .= $authconfig_enabled_ldap_command; 
+    }
+
+    else {
+            //turn the local ldap server off
+            $ldap = new LDAPServer(NULL, NULL, NULL);
+            $ldap->Stop();
+			$authconfigcommand .= $authconfig_disabled_ldap_command; 
+    }
+
+	if (strlen($_POST["useldap"]) > 0 && $localldap != "on") {
+
+		$my_rootdn = $ldaprootbinddn;
+		$my_basedn = $ldaprootbinddn;
+		$my_password = $ldaprootbindpw;
+		$my_tls = False;
+
+		if ($authobj->test_ldap_connection($my_rootdn, $my_basedn, $my_password, $my_tls)) {
+			$authconfigcommand .= $authconfig_enabled_ldap_command; 
+		}
+
+		else {
+			$authconfigcommand .= $authconfig_disabled_ldap_command;
+		}
+	}
+
+
+	$authobj->command_string=$authconfigcommand;
+    $ret = $authobj->execute();
+
+	
+    if ((isset($_POST["usewinbind"]) && (strcasecmp($_POST["usewinbind"], "on") == 0) && (strcasecmp($_POST["winbindjoin"], "on") == 0) && (strcmp($newidmapsync, "ldap") == 0))
+            || (isset($_POST["smb_login"]) && (strcasecmp($_POST["smb_login"], "on") == 0)))
+    {
+            exec("/usr/bin/sudo /usr/bin/smbpasswd -w " . escapeshellarg($_POST["ldaprootbindpw"]));
+    }
+
+
+    if (strcmp($newidmapsync, "ldap") == 0)
+    {
+            // Delete the TDB files as specified in ticket #136
+
+            exec("/usr/bin/sudo /bin/rm -f /var/cache/samba/winbindd_cache.tdb");
+            exec("/usr/bin/sudo /bin/rm -f /var/cache/winbindd_idmap.tdb");
+    }
+
+
+    apply_configuration(array("services" => "restart", "winbindrestart" => true, "chmod" => "yes", "chmod_path" => ""));
+
+    $fp = popen("/usr/bin/sudo /usr/bin/at now + 1 minutes", "w");
+    fputs($fp, "/sbin/service openfiler restart 2>/dev/null > /dev/null \n");
+    pclose($fp);
+
+    if ($error)
+            setcookie("error", implode("\n",$error));
+
+    header("Location: ./");
+    exit;
+}
+
+$error = $_COOKIE['error'];
+if ($error)
+	setcookie("error", "", time() - 3600); //remove cookie
+
+
+	generic_header(array("title" => _("Accounts : Authentication"), "ajax" => $ajax));
+	single_begin(array());
+
+?>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+
+function check_ldap_onchange() {
+
+        document.authform.useldap.checked = document.authform.localldap.checked;
+
+}
+
+function ldap_onchange()
+{
+	document.authform.ldapauthserver.value = document.authform.ldapserver.value;
+	document.authform.ldapauthbasedn.value = document.authform.ldapbasedn.value;
+	document.authform.ldapauthtls.checked = document.authform.ldaptls.checked;
+
+	document.authform.newldapidmapserver.value = document.authform.ldapserver.value;
+	document.authform.newldapidmapbasedn.value = document.authform.ldapbasedn.value;
+	document.authform.newldapidmaprootbinddn.value = document.authform.ldaprootbinddn.value;
+	document.authform.newldapidmaprootbindpw.value = document.authform.ldaprootbindpw.value;
+	document.authform.newldapidmaptls.checked = document.authform.ldaptls.checked;
+}
+
+function ldapauth_onchange()
+{
+	document.authform.ldapserver.value = document.authform.ldapauthserver.value;
+	document.authform.ldapbasedn.value = document.authform.ldapauthbasedn.value;
+	document.authform.ldaptls.checked = document.authform.ldapauthtls.checked;
+
+	document.authform.newldapidmapserver.value = document.authform.ldapauthserver.value;
+	document.authform.newldapidmapbasedn.value = document.authform.ldapauthbasedn.value;
+	document.authform.newldapidmaptls.checked = document.authform.ldapauthtls.checked;
+}
+
+function ldapidmap_onchange()
+{
+	document.authform.ldapserver.value = document.authform.newldapidmapserver.value;
+	document.authform.ldapbasedn.value = document.authform.newldapidmapbasedn.value;
+	document.authform.ldaprootbinddn.value = document.authform.newldapidmaprootbinddn.value;
+	document.authform.ldaprootbindpw.value = document.authform.newldapidmaprootbindpw.value;
+	document.authform.ldaptls.checked = document.authform.newldapidmaptls.checked;
+
+	document.authform.ldapauthserver.value = document.authform.newldapidmapserver.value;
+	document.authform.ldapauthbasedn.value = document.authform.newldapidmapbasedn.value;
+	document.authform.ldapauthtls.checked = document.authform.newldapidmaptls.checked;
+}
+
+function winbind_onchange()
+{
+	document.authform.smbworkgroup.value = document.authform.winbinddomain.value;
+	document.authform.smbservers.value = document.authform.winbindcontrollers.value;
+}
+
+function smb_onchange()
+{
+	document.authform.winbinddomain.value = document.authform.smbworkgroup.value;
+	document.authform.winbindcontrollers.value = document.authform.smbservers.value;
+}
+
+function winbind_realm_onchange()
+{
+	document.authform.krbrealm.value = document.authform.winbindrealm.value;
+}
+
+function krb_realm_onchange()
+{
+	document.authform.winbindrealm.value = document.authform.krbrealm.value;
+}
+
+// -->
+</script>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_ACCOUNTS");
+
+	/*$authp = popen("/usr/bin/sudo /usr/sbin/authconfig --kickstart", "r");
+	$i = 0;
+	while (!feof($authp))
+		$aresult[$i++] = trim(fgets($authp, 4096));
+	pclose($authp);
+	if ($error){
+		print("<p align=\"center\"><strong><font color=\"red\">");
+		foreach (explode("\n",$error) as $line)
+			print($line . "<br />\n");
+		print("</font></strong></p>");
+	}*/
+?>
+
+
+        <table cellpadding="0" cellspacing="0" border="0" style="width: 98%;">
+            <tr>
+                <td id="page_nav" style="margin-left: auto; margin-right: auto;">
+                    <ul>
+                        <li id="config_standard" ><a href="#"  onclick="return setView('off');" >Standard View</a></li>
+                        <li id="config_expert" ><a href="#" onclick="return setView('on');" >Expert View</a></li>
+                    </ul>
+                </td>
+            </tr>
+
+        </table>
+        <br/>
+	<?php printMessageBlock("info", "<p><strong>Standard View</strong> is sufficient for most authentication configuration requirements. Select <strong>Expert View</strong> only if you know <strong>exactly what you are doing.</strong></p>");?>
+
+	<form name="authform" method="post" action="./">
+	<h3 align="center">User Information Configuration</h3>
+
+	<table cellpadding="0" cellspacing="0" border="0">
+
+	<tr>
+		<td>
+			<div class="auth_config_head">
+				<input type="checkbox" id="useldap"  name="useldap" <?php print((strncasecmp($authobj->globalSettings['nss_ldap'], "enabled", 7) == 0) ? "checked=\"checked\"" : ""); ?> /> Use LDAP
+			</div>
+		</td>
+	</tr>
+	<tr>
+		<td valign="top" align="left">
+			<div class="auth_config_body">
+				<table cellpadding="8" cellspacing="2" border="0" width="100%">
+					<tr>
+						<td class="color_table_heading" align="right">Local LDAP server:</td>
+						<td class="color_table_row1"><input type="checkbox" onchange="check_ldap_onchange()" id="localldap" name="localldap" <?php print((strncasecmp($ldap_localserver, "YES", 3) == 0) ? "checked=\"checked\"" : ""); ?> /> Use Local LDAP Server</td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">LDAP Security:</td>
+						<td class="color_table_row2"><input type="checkbox" onchange="ldap_onchange()" name="ldaptls" <?php print((strncasecmp($authobj->get_nss_ldap_tls(), "True", 4) == 0) ? "checked=\"checked\"" : ""); ?> /> Use TLS</td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Server:</td>
+						<td class="color_table_row1" align="left"><input type="text" onchange="ldap_onchange()" name="ldapserver" value="<?php print(htmlentities($authobj->get_nss_ldap_server())); ?>" /></td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Base DN:</td>
+						<td class="color_table_row2" align="left"><input type="text" onchange="ldap_onchange()" name="ldapbasedn" value="<?php print(htmlentities($authobj->get_nss_ldap_base_dn())); ?>" /></td>
+					</tr>
+					<tr id="auth_bind_dn_expert">
+						<td class="color_table_heading" align="right">Authenticated bind DN:</td>
+						<td class="color_table_row1" align="left"><input type="text" name="ldapbinddn" value="<?php print(htmlentities($authobj->get_nss_ldap_binddn())); ?>" /></td>
+					</tr>
+					<tr id="auth_bind_pw_expert">
+						<td class="color_table_heading" align="right">Authenticated bind password:</td>
+						<td class="color_table_row2" align="left"><input type="text" name="ldapbindpw" value="<?php print(htmlentities($authobj->get_nss_ldap_bindpw())); ?>" /></td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Root bind DN:</td>
+						<td class="color_table_row1" align="left"><input type="text" onchange="ldap_onchange()" name="ldaprootbinddn" value="<?php print(htmlentities($authobj->get_nss_ldap_root_dn())); ?>" /></td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Root bind password:</td>
+						<td class="color_table_row2" align="left"><input type="password" name="ldaprootbindpw" value="<?php print(htmlentities($authobj->get_nss_ldap_root_pw())); ?>" /></td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">SMB LDAP Configuration:</td>
+						<td class="color_table_row1"><input type="checkbox" name="smb_login" <?php print((strncasecmp($ldap_smb_login, "YES", 3) == 0) ? "checked=\"checked\"" : ""); ?> /> Login SMB server to root DN</td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">User password policy:</td>
+						<td class="color_table_row2"><input type="checkbox" name="usersetpw" <?php print((strncasecmp($ldap_usersetpw, "YES", 3) == 0) ? "checked=\"checked\"" : ""); ?> /> Allow user to change password</td>
+					</tr>
+				</table>
+			</div>
+		</td>
+	</tr>
+	<tr><td><p><br/><br/></p></td></tr>
+	<tr>
+		<td>
+			<div class="auth_config_head">
+				<input type="checkbox" name="usewinbind" <?php print((strncasecmp($authobj->globalSettings['pam_winbind'], "enabled", 7) == 0) ? "checked=\"checked\"" : ""); ?> /> Use Windows domain controller and authentication
+			</div>
+		</td>
+	</tr>
+	<tr>
+		<td valign="top" align="left">
+			<div class="auth_config_body">
+				<table cellpadding="8" cellspacing="2" border="0" width="100%">
+					<tr>
+						<td class="color_table_heading" align="right">Security model:</td>
+						<td class="color_table_row2" align="left" colspan="3"><input type="radio" name="winbindtype" id="security_ads" value="ads" onclick="enable_disable_realm('on')" <?php print((strncasecmp($authobj->get_smb_security_mode(), "ads", 3) == 0) ? " checked=\"checked\"" : ""); ?> />&nbsp;Active&nbsp;Directory<br /><input type="radio" name="winbindtype" id="security_nt4" value="domain" onclick="enable_disable_realm('off')" <?php print((strncasecmp($authobj->get_smb_security_mode(), "ads", 3) != 0) ? " checked=\"checked\"" : ""); ?> />&nbsp;NT4-style Domain (RPC)</td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Domain / Workgroup:</td>
+						<td class="color_table_row1" align="left" colspan="3"><input type="text" onchange="winbind_onchange()" name="winbinddomain" value="<?php print(htmlentities($authobj->get_pam_winbind_workgroup())); ?>" /></td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Domain controllers:</td>
+						<td class="color_table_row2" align="left" colspan="3"><input type="text" onchange="winbind_onchange()" name="winbindcontrollers" value="<?php print(htmlentities($authobj->get_winbind_domain_controllers())); ?>" /></td>
+					</tr>
+					<tr id="ads_realm_value">
+						<td class="color_table_heading" align="right">ADS realm:</td>
+						<td class="color_table_row1" align="left" colspan="3"><input type="text" onchange="winbind_realm_onchange()" name="winbindrealm" value="<?php print(htmlentities($authobj->get_ad_realm())); ?>" /></td>
+					</tr>
+					<tr id="winbind_uid_range">
+						<td class="color_table_heading" align="right">UID range:</td>
+						<td class="color_table_row2" align="left" colspan="3"><input type="text" name="winbinduidrange" value="<?php print(htmlentities($authobj->get_idmap_uid())); ?>" /></td>
+					</tr>
+					<tr id="winbind_gid_range">
+						<td class="color_table_heading" align="right">GID range:</td>
+						<td class="color_table_row1" align="left" colspan="3"><input type="text" name="winbindgidrange" value="<?php print(htmlentities($authobj->get_idmap_gid())); ?>" /></td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Join domain:</td>
+						<td class="color_table_row2" align="left"><input type="checkbox" name="winbindjoin" />&nbsp;Join Openfiler to domain &nbsp;</td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Administrator username:</td>
+						<td class="color_table_row1" align="left" colspan="3"><input type="text" name="winbindadminusername" value="Administrator" /></td>
+					</tr>
+					<tr>
+						<td class="color_table_heading" align="right">Administrator password:</td>
+						<td class="color_table_row2" align="left" colspan="3"><input type="password" name="winbindadminpassword" value="" /></td>
+					</tr>
+					<tr>
+						<td colspan="2">
+							<div id="auth_config_winbind_idmap_expert">
+								<table cellspacing="2" cellpadding="8" border="0">
+									<tr>
+										<td colspan="4"><hr /></td>
+									</tr>
+									<tr>
+										<td colspan="4">The following configuration options are required only if you wish to synchronize  group ID and user ID information across multiple Openfiler instances.</td>
+									</tr>
+									<tr>
+										<td class="color_table_heading" align="right">UID/GID Synchronization</td>
+                                                                                <td class="color_table_row1"><input type="radio" name="newidmapsync" value="nosync" onclick="toggleidmapsync(this)"  <?php print($noidmapsync ? " checked=\"checked\"" : ""); ?> />None</td>
+                                                                                <td class="color_table_row1"><input type="radio" name="newidmapsync" value="ad"  onclick="toggleidmapsync(this)" <?php print($adidmapsync ? " checked=\"checked\"" : ""); ?> />Active Directory</td>
+										<td class="color_table_row1"><input type="radio" name="newidmapsync" value="ldap" onclick="toggleidmapsync(this)" <?php print($ldapidmapsync ? " checked=\"checked\"" : ""); ?> /> LDAP</td>
+									</tr>
+									<tr class="adidmapsync">
+										<td colspan="4" width="100%">
+											<div class="auth_config_body">
+											<div style="border: 2px solid #ebebeb; width:100%; height:20em; text-align:left; background:white; overflow:auto; padding:4px;">
+											<table id="tabadidmapsync" width="100%" cellspacing="2" cellpadding="8" border="0">
+											<tr><td class="color_table_heading" align="right"><strong>Option:</strong>
+											</td>
+											<td class="color_table_row1"><input type="text" id="newadoption" name="newadoption" value=""/></td>
+											<td class="color_table_row2">
+											    <input type="button" name="addadoption" value="Add Option" onclick="tinker_addAdOption(document.getElementById('newadoption').value); document.getElementById('newadoption').value = ''"/>
+											</td>
+											</tr>
+											<?php 
+												foreach($adOptions as $adOption) {
+													
+													$optionKey = $adOption->getAttribute('key');
+													$optionValue = $adOption->getAttribute('value');
+
+													print("\n<tr id=\"tr-$optionKey\"><td class=\"color_table_row1\" colspan=\"2\"><span>$optionValue</span>");
+													print("</td>\n<td class=\"color_table_row2\"><input type=\"button\" name=\"but-$optionKey\" value=\"Delete\" onclick=\"tinker_delAdOption('$optionKey')\" /></td></tr>");
+												}
+
+											?>	
+											</table>
+											</div>
+											</div>
+										</td>
+									</tr>
+									<tr class="ldapidmapsync">
+										<td colspan="4" width="100%">
+										<table width="100%" cellspacing="2" cellpadding="8">
+										<tr>
+										<td class="color_table_heading" align="right">LDAP Security:</td>
+										<td class="color_table_row2" align="left"><input type="checkbox" onchange="ldapidmap_onchange()" name="newldapidmaptls"<?php print((strncasecmp($authobj->get_nss_ldap_tls(), "True", 4) == 0) ? "checked=\"checked\"" : ""); ?> /> Use TLS</td>
+										</tr>
+										<tr>
+										<td class="color_table_heading" align="right">LDAP ID map server:</td>
+										<td class="color_table_row1" align="left" colspan="3"><input type="text" onchange="ldapidmap_onchange()" name="newldapidmapserver" value="<?php print(htmlentities($authobj->get_nss_ldap_server())); ?>" /></td>
+										</tr>
+										<tr>
+										<td class="color_table_heading" align="right">LDAP ID map base DN:</td>
+										<td class="color_table_row2" align="left" colspan="3"><input type="text" onchange="ldapidmap_onchange()" name="newldapidmapbasedn" value="<?php print(htmlentities($authobj->get_nss_ldap_base_dn())); ?>" /></td>
+										</tr>
+										<tr>
+										<td class="color_table_heading" align="right">LDAP ID map root bind DN:</td>
+										<td class="color_table_row1" align="left" colspan="3"><input type="text" onchange="ldapidmap_onchange()" name="newldapidmaprootbinddn" value="<?php print(htmlentities($authobj->get_nss_ldap_binddn())); ?>" /></td>
+										</tr>
+										<tr>
+										<td class="color_table_heading" align="right">LDAP ID map root bind password:</td>
+										<td class="color_table_row2" align="left" colspan="3"><input type="password" name="newldapidmaprootbindpw" value="<?php print(htmlentities($authobj->get_nss_ldap_bindpw())); ?>" /></td>
+										</tr>
+										<tr>
+										<td class="color_table_heading" align="right">LDAP ID map suffix:</td>
+										<td class="color_table_row1" align="left" colspan="3"><input type="text" name="newldapidmapsuffix" value="<?php print(htmlentities($ldapidmapsuffix)); ?>" /></td>
+										</tr>
+										</table>
+										</td>
+									</tr>
+								</table>
+							</div>
+						</td>
+					</tr>
+				</table>
+			</div>
+		</td>
+	</tr>
+	<tr><td><p><br/><br/></p></td></tr>
+
+	</table>
+
+	<p align="center">&nbsp;</p>
+	<hr />
+	<div id="auth_config_expert">
+		<h3 align="center">Authentication Configuration</h3>
+
+		<input type="hidden" name="usemd5" value="on" />
+		<input type="hidden" name="useshadow" value="on" />
+
+		<table cellpadding="0" cellspacing="0" border="0">
+			<tr>
+				<td>
+					<div class="auth_config_head">
+						<input type="checkbox" name="useldapauth" <?php print((strncasecmp($authobj->globalSettings['pam_ldap'], "enabled", 7) == 0) ? "checked=\"checked\"" : ""); ?> /> Use LDAP Authentication
+					</div>
+				</td>
+			</tr>
+			<tr>
+				<td valign="top" align="left">
+					<div class="auth_config_body">
+						<table cellpadding="8" cellspacing="2" border="0" width="100%">
+							<tr>
+								<td class="color_table_row1" align="left" colspan="2"><input type="checkbox" onchange="ldapauth_onchange()" name="ldapauthtls" <?php print((strncasecmp($authobj->get_pam_ldap_tls(), "True", 4) == 0) ? "checked=\"checked\"" : ""); ?> /> Use TLS</td>
+							</tr>
+							<tr>
+								<td class="color_table_heading" align="right">Server:</td>
+								<td class="color_table_row2" align="left"><input type="text" onchange="ldapauth_onchange()" name="ldapauthserver" value="<?php print($authobj->get_pam_ldap_server()); ?>" /></td>
+							</tr>
+							<tr>
+								<td class="color_table_heading" align="right">Base DN:</td>
+								<td class="color_table_row1" align="left"><input type="text" onchange="ldapauth_onchange()" name="ldapauthbasedn" value="<?php print(htmlentities($authobj->get_pam_ldap_base_dn())); ?>" /></td>
+							</tr>
+						</table>
+					</div>
+				</td>
+			</tr>
+			<tr><td><p><br/><br/></p></td></tr>
+			<tr>
+				<td>
+					<div class="auth_config_head">
+						<input type="checkbox" name="usekerberos" <?php print((strncasecmp($authobj->globalSettings['pam_krb5'], "enabled", 7) == 0) ? "checked=\"checked\"" : ""); ?> /> Use Kerberos 5
+					</div>
+				</td>
+				</tr>
+			<tr>
+				<td valign="top" align="left">
+					<div class="auth_config_body">
+						<table cellpadding="8" cellspacing="2" border="0" width="100%">
+							<tr>
+								<td class="color_table_heading" align="right">Realm:</td>
+								<td class="color_table_row2" align="left"><input type="text" onchange="krb_realm_onchange()" name="krbrealm" value="<?php print(htmlentities($authobj->get_krb5_realm())); ?>" /></td>
+							</tr>
+							<tr>
+								<td class="color_table_heading" align="right">KDC:</td>
+								<td class="color_table_row1" align="left"><input type="text" name="krbkdc" value="<?php print(htmlentities($authobj->get_krb5_kdc())); ?>" /></td>
+							</tr>
+							<tr>
+								<td class="color_table_heading" align="right">Admin Server:</td>
+								<td class="color_table_row2" align="left"><input type="text" name="krbadminserver" value="<?php print(htmlentities($authobj->get_krb5_admin_server())); ?>" /></td>
+							</tr>
+						</table>
+					</div>
+				</td>
+			</tr>
+			<tr><td><p><br/><br/></p></td></tr>
+
+			<tr>
+				<td>
+					<div class="auth_config_head">
+						<input type="checkbox" name="usenis" <?php print((strncasecmp($authobj->globalSettings['nss_nis'], "enabled", 7) == 0) ? "checked=\"checked\"" : ""); ?> /> Use NIS
+					</div>
+				</td>
+			</tr>
+			<tr>
+				<td valign="top" align="left">
+					<div class="auth_config_body">
+						<table cellpadding="8" cellspacing="2" border="0" width="100%">
+							<tr>
+								<td class="color_table_heading" align="right">Domain:</td>
+								<td class="color_table_row2" align="left"><input type="text" name="nisdomain" value="<?php print(htmlentities($authobj->get_nss_nis_domain())); ?>" /></td>
+							</tr>
+							<tr>
+								<td class="color_table_heading" align="right">Server:</td>
+								<td class="color_table_row1" align="left"><input type="text" name="nisserver" value="<?php print(htmlentities($authobj->get_nss_nis_server())); ?>" /></td>
+							</tr>
+						</table>
+					</div>
+				</td>
+			</tr>
+
+		</table>
+	</div>
+
+	<?php printMessageBlock("info", "<p>When you make changes and submit, the changes will be applied,
+	but please give the Openfiler service about 1 minute to restart for the changes to take effect.
+	You may then verify these changes in the <a href=\"account_groups.html\">list of groups section</a>.</p>");?>
+
+	<p align="center"><input type="submit" value="Submit" /> &nbsp; <input type="reset" value="Reset" /></p>
+
+	</form>
+
+	<script language="JavaScript" type="text/javascript">
+
+	 
+		function onoffldapidmapsync(onoff) {
+                        var ldapidmapElem = document.getElementsByClassName('ldapidmapsync'); 
+                        for (var i = 0; i<ldapidmapElem.length; i++)
+                                ldapidmapElem[i].style.display = onoff;
+                        
+                }
+
+		function onoffadidmapsync(onoff) {
+			var adidmapElem = document.getElementsByClassName('adidmapsync');
+			for (var i = 0; i<adidmapElem.length; i++)
+				adidmapElem[i].style.display = onoff;
+		}
+
+                function toggleidmapsync(item) {
+                        if (item.value == "ldap") {
+                                onoffldapidmapsync("");
+				onoffadidmapsync("none");
+                        }
+			
+			else if (item.value == "ad") {
+				onoffadidmapsync("");
+ 				onoffldapidmapsync("none");
+			}
+                        else { 
+                                onoffldapidmapsync("none");
+				onoffadidmapsync("none");
+                        }
+                }
+
+
+	 	function setView(state)
+	 	{
+	 		if (state == "off")
+	 		{
+	 			    document.getElementById('auth_config_expert').style.display = 'none';
+	 			    document.getElementById('auth_config_winbind_idmap_expert').style.display = 'none';
+	 			    document.getElementById('winbind_uid_range').style.display = 'none';
+	 			    document.getElementById('winbind_gid_range').style.display = 'none';
+	 			    document.getElementById('auth_bind_dn_expert').style.display = 'none';
+	 			    document.getElementById('auth_bind_pw_expert').style.display = 'none';
+                                    document.getElementById('config_expert').style.background="<?php print($GLOBALS["color_page_tab1_regular_background"]); ?>";
+                                    document.getElementById('config_standard').style.background="<?php print($GLOBALS["color_page_tab1_highlighted_background"]); ?>";
+
+
+	 		}
+
+	 		else if (state == "on")
+	 		{
+	 			    document.getElementById('auth_config_expert').style.display = 'block';
+	 			    document.getElementById('auth_config_winbind_idmap_expert').style.display = 'block';
+	 			    document.getElementById('winbind_uid_range').style.display = '';
+	 			    document.getElementById('winbind_gid_range').style.display = '';
+	 			    document.getElementById('auth_bind_dn_expert').style.display = '';
+	 			    document.getElementById('auth_bind_pw_expert').style.display = '';
+                                    document.getElementById('config_standard').style.background="<?php print($GLOBALS["color_page_tab1_regular_background"]); ?>";
+                                    document.getElementById('config_expert').style.background="<?php print($GLOBALS["color_page_tab1_highlighted_background"]); ?>";
+
+	 		}
+                    return false;
+
+	 	}
+
+	 	function enable_disable_realm(realmState)
+	 	{
+
+	 		if (realmState == "on")
+	 		{
+	 			document.getElementById('ads_realm_value').style.display = '';
+	 		}
+
+	 		else if (realmState == "off")
+	 		{
+	 			document.getElementById('ads_realm_value').style.display = 'none';
+	 		}
+
+	 	}
+
+		document.getElementsByClassName = function(clsName) { 
+ 			var retVal = new Array(); 
+ 			var elements = document.getElementsByTagName("*"); 
+ 			for(var i = 0;i < elements.length;i++) { 
+ 				if(elements[i].className.indexOf(" ") >= 0) { 
+ 					var classes = elements[i].className.split(" "); 
+ 						for(var j = 0;j < classes.length;j++) { 
+ 							if(classes[j] == clsName) 
+  								retVal.push(elements[i]); 
+ 						} 
+ 				} 
+ 				else if(elements[i].className == clsName) 
+ 					retVal.push(elements[i]); 
+ 			} 
+ 			return retVal; 
+		}
+
+             	window.onload()
+	 	{
+			synctype = <?php print("\"$idmapsync\""); ?>;
+			if (synctype == "nosync") {
+	 			setView("off");
+				onoffldapidmapsync("none");
+				onoffadidmapsync("none");
+
+				
+			} 
+
+			else {
+				setView("on");
+				if (synctype == "ldap") {
+					onoffldapidmapsync("");
+					onoffadidmapsync("none");
+				}
+
+				else {
+					onoffldapidmapsync("none");
+					onoffadidmapsync("");
+					
+				}
+			}
+
+
+	 		if (document.getElementById('security_nt4').checked)
+	 		{
+	 			enable_disable_realm("off");
+	 		}
+
+		
+                       
+	 	}
+ 
+
+	</script>
+
+<?php
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

@@ -1,0 +1,203 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    include("authenticated.inc");
+
+	if ($action == "backup"){
+		$ldap = new LDAPServer();
+		$content = implode("\n",$ldap->backup());
+		header("Pragma: public");
+		header("Expires: 0");
+		header("Cache-Control: must-revalidate, post-check=0, pre-check=0");
+		header("Content-Type: application/force-download");
+		header("Content-Type: application/octet-stream");
+		header("Content-Type: application/download");
+		header("Content-Disposition: attachment; filename=LDAP_backup.ldif;");
+		header("Content-Transfer-Encoding: binary");
+		$length = array_sum(count_chars($content));
+		header("Content-Length: ". $length);
+
+		print($content);
+		exit();
+	}
+	elseif ($action == "recover"){
+		if ($_FILES['recover']['name']) {
+			$lines = file($_FILES['recover']['tmp_name']);
+
+			//verify this is an ldif file
+			if (!preg_grep("/objectclass/i", $lines)){
+				$error[] = "File does not appear to be a correct LDIF backup file.";
+				$error[] = "Please confirm that the file used is a text LDIF.";
+			}
+			else{
+				// the basedn from slapd.conf must be the same as the LDIF that we are
+				// restoring.  The following block finds the LDIF basedn and recreates
+				// the ldap server with compatible settings.  This makes the restore
+				// much easier on the end user
+
+				//find out the LDIF's basedn
+				$dn = array_shift(preg_grep("/dn: /",$lines));
+				$dn = trim(str_replace("dn:","", $dn));
+
+				$ldap = new LDAPServer($dn, "cn=manager," . $dn);
+				$ldap->Create(); //create server with new settings
+				$ldap->Authconfig(); //fix authconfig to represent new LDAP settings
+				$status = $ldap->Restore($lines);
+				if ($status){
+					$error[] = $status;
+					$error[] = "Error detected during recovery, please check the input file";
+				}
+			}
+		}
+
+	}
+	elseif ($action == "rebuild"){
+		$ldap = new LDAPServer();
+		$ldap->Create();
+	}
+	elseif ($action == "clear"){
+		if ($confirm == "yes"){
+			$ldap = new LDAPServer();
+			$ldap->Delete();
+
+			header("Location: ./services_ldap.html");
+			exit;
+		}
+		else
+			$showconfirm = "clear";
+	}
+
+	generic_header(array("title" => _("Services : LDAP Setup")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+
+<?php
+
+        nested_tab_begin("C_SERVICES_LDAP");
+        if ($showconfirm == "clear"){
+?>
+		<h5>Confirm LDAP clear</h5>
+		Are you sure that you want to delete the LDAP server?<br />
+		[ <a href=?action=clear&confirm=yes>Yes</a> / <a href=services_ldap.html>No</a> ]
+<?php
+	}
+	else{
+		if ($error){
+			print("<p><font color=red>" . implode("<br />\n", $error) . "</font></p>");
+		}
+?>
+		<div align="center" style="width: 100%;">
+		<h3 align="center">Local LDAP Settings</h3>
+		<?php printMessageBlock("info", "<p>The following options are for use with the local LDAP server.</p>"); ?>
+
+                <form action="services_ldap.html" method="post">
+		<table border="0" cellpadding="8" cellspacing="2" width="50%">
+
+                <tr><td align="center" class="color_table_heading">Backup LDAP</td></tr>
+		<tr><td class="color_table_row1" align="center">
+
+			<p>This option creates a LDIF backup of the LDAP directory. Lightweight Directory Interchange Format files are used to exchange or backup data from LDAP servers.</p>
+			<input type="hidden" name="action" value="backup" />
+                </td></tr>
+                <tr><td align="center">
+			<input class="button" type="submit" name="submit" value="Backup LDAP" />
+		</td></tr>
+
+                </table>
+		 </form>
+                <hr/>
+                 <form enctype="multipart/form-data" action="services_ldap.html" method="post">
+                <table border="0" cellpadding="8" cellspacing="2" width="50%">
+
+                <tr><td align="center" class="color_table_heading">Recover LDAP</td></tr>
+		<tr><td class="color_table_row2" align="center">
+
+			<p>This option should be used to recover an LDIF backup.  Any existing data in the LDAP will be erased during the recovery.<br />
+Note: The LDAP authentication settings will be adjusted to be compatible with the backup file.</p>
+
+                </td></tr>
+                <tr><td align="center">
+			<input class="button" type="submit" name="submit" value="Recover LDAP" />
+		</td></tr>
+
+
+                </table>
+                 <input type="hidden" name="MAX_FILE_SIZE" value="200000" />
+			<input type="file" name="recover" size="30" /><br /><br />
+			<input type="hidden" name="action" value="recover" />
+		</form>
+                <hr/>
+                <form action="services_ldap.html" method="post">
+                <table border="0" cellpadding="8" cellspacing="2" width="50%">
+
+                <tr><td><br/></td></tr>
+                <tr><td align="center" class="color_table_heading">Rebuild LDAP</td></tr>
+		<tr><td class="color_table_row1" align="center">
+
+			<p>This option is used to fix errors in the LDAP directory, such as stale lock files.  Performing this option after clearing the LDAP will result in an empty, but useable LDAP.</p><br />
+			<input type="hidden" name="action" value="rebuild" />
+
+                </td></tr>
+                <tr><td align="center">
+                        <input class="button" type="submit" name="submit" value="Rebuild LDAP" />
+		</td></tr>
+
+                </table>
+                </form>
+		<hr/>
+                <form action="services_ldap.html" method="post">
+                <table border="0" cellpadding="8" cellspacing="2" width="50%">
+
+                <tr><td><br/></td></tr>
+                <tr><td align="center" class="color_table_heading">Clear LDAP directory</td></tr>
+		<tr><td class="color_table_row2" align="center">
+
+			<p>Clearing the LDAP directory deletes all the files associated with the directory.  The LDAP server should be re-initialized after it is cleared.</p><br />
+			<input type="hidden" name="action" value="clear" />
+                </td></tr>
+                <tr><td align="center">
+		<input class="button" type="submit" name="submit" value="Clear LDAP" />
+
+		</td></tr></table>
+                </form>
+		</div>
+<?php
+	}
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

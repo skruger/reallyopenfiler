@@ -1,0 +1,140 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    include("authenticated.inc");
+
+	$conary_log = "/var/log/conary";
+
+	function replace_callback($content) {
+		global $ob_replace;
+
+		// Make sure ob_replace is an array
+		if (!is_array($ob_replace)) {
+			return $content;
+		}
+
+		// Do each replace
+		foreach ($ob_replace as $r) {
+			$content = str_replace($r['0'], $r['1'], $content);
+		}
+
+		return $content;
+	}
+
+	function output_replace($search, $replace) {
+		global $ob_replace;
+
+		if (!is_array($ob_replace)) { $ob_replace = array(); }
+
+		$ob_replace[] = array($search, $replace);
+	}
+
+	//ob_start('replace_callback');
+	generic_header(array("title" => _("System : Update")));
+	//output_replace ('<body', '<body onload="initpage()" ');
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_GENERAL_UPDATE");
+?>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+var update_popup;
+
+function onloadInitUpdatePage() {
+	toBottom('updatelog');
+}
+function showWindow() {
+	if (update_popup && !update_popup.closed) {
+		update_popup.focus();
+	}
+	else {
+		update_popup=window.open('system_update.html','system_update','width=800,height=500,scrollbars=yes,resizable=yes');
+	}
+	return false;
+}
+
+function toBottom(div) {
+	var objDiv = document.getElementById(div);
+	if (objDiv != null) { objDiv.scrollTop = objDiv.scrollHeight; }
+}
+
+function toggleLayer(Layer){
+	if (document.getElementById){
+		// this is the way the standards work
+		var style2 = document.getElementById(Layer).style;
+	}
+	else if (document.all){
+		// this is the way old msie versions work
+		var style2 = document.all[Layer].style;
+	}
+	else if (document.layers){
+		// this is the way nn4 works
+		var style2 = document.layers[Layer].style;
+	}
+	if (style2.display == "none")
+		style2.display="block";
+	else
+		style2.display="none";
+}
+// -->
+</script>
+
+<h2 align="center">System Update</h2>
+<?php printMessageBlock("info", "
+<p>The system update needs to run in a seperate window.
+To open the update page, click the link below."); ?>
+<a href="system_update.html" onclick="showWindow();return false;">Launch system update</a></p>
+<hr />
+
+	<h3 align="center">Update Log</h3>
+	<div id="updatelog" style="display: block; width: 800px; height: 400px; overflow: auto; padding: 5px; margin: 10px; border: solid 1px rgb(180, 180, 180); background: white; text-align: left">
+
+<?php
+	$log = file($conary_log);
+	$log = str_replace("   ", "&nbsp;&nbsp;&nbsp;", $log);
+	$log = str_replace("\n", "<br />\n", $log);
+	foreach ($log as $line)
+		print($line);
+	if (empty($log))
+		print("The log is empty");
+	print("</div>");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

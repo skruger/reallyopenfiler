@@ -1,0 +1,125 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+    include("authenticated.inc");
+
+
+
+
+
+
+	generic_header(array("title" => _("System : UPS Setup"), "ajax" => $ajax));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_GENERAL_UPS");
+	// add the hidden div for editing
+
+	print("<h3 align=\"center\">Uninterruptable Power Supply Device Configuration</h3>\n");
+	print("<form name=\"upsselectform\" id=\"upsselectform\" action=\"system_ups.html\" method=\"post\">\n");
+	print("<select name=\"upsnameselect\" id=\"upsnameselect\" onchange=\"disableConfigure();\">\n");
+	print("<option id=\"selectnone\" selected=\"selected\" value=\"none\">Select UPS to Add</option>\n");
+ 	for ($i=0; $i < count($upsdevices_id); $i++){
+
+        print("\t\t<option value=\"" . $upsdevices_id[$i] . "\">" . $upsdevicelist[$i] . "</option>\n" );
+
+    }
+
+
+	print("</select>\n");
+    print("<input type=\"button\" id=\"addupsdevicebutton\" name=\"addupsdevicebutton\" value=\"Configure\" onclick=\" addCurtain(); tinker_buildConfigForm(document.getElementById('upsnameselect').value, 'build'); document.getElementById('addupsdevicebutton').disabled = true; document.getElementById('upsnameselect').disabled = true;\"/>\n");
+    print("</form>\n");
+
+	print("<div id=\"upsconfigformdiv\" name=\"upsconfigformdiv\"></div>\n");
+
+	print("<hr />\n");
+
+
+	print("<div id=\"devicesiddiv\" align=\"center\">\n");
+
+
+
+	print("</div>\n");
+	print("<hr/>\n");
+
+
+
+	?>
+	 <script type="text/javascript">
+
+
+	 function onloadGeneralUps()
+	 {
+	 	runScripts();
+	 	tinker_onLoadPrintTable();
+	 	disableConfigure();
+	 }
+
+	 function addCurtain()
+	 {
+	 	bg = document.createElement("div");
+	 	bg.id = "curtain";
+	 	bg.className = "Curtain";
+	 	document.body.appendChild(bg);
+	 }
+
+	 function removeCurtain()
+	 {
+	 	document.body.removeChild(bg);
+	 	disableConfigure();
+	 }
+
+
+
+	 function disableConfigure()
+	 {
+	 	// disable the configure button if no actual UPS has been selected. Called during onload and from onchange of upsnameselect dropdown.
+
+	 	if (document.upsselectform.upsnameselect.selectedIndex == 0)
+	 		document.upsselectform.addupsdevicebutton.disabled = true;
+	 	else
+	 		document.upsselectform.addupsdevicebutton.disabled = false;
+	 }
+
+	 </script>
+
+	<?php
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>
+

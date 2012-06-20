@@ -1,0 +1,136 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require_once("pre.inc");
+    require_once("service.inc");
+    require_once("authenticated.inc");
+
+
+
+    $sm = new ServiceManager(); 
+    /*
+    if ($action == "disable") {
+        
+        $serviceObj = $sm->getService($service); 
+        $serviceObj->stop(); 
+        $serviceObj->disable(); 
+
+    
+     
+    }
+
+    else if ($action == "enable")
+	{
+
+        $serviceObj = $sm->getService($service); 
+        $serviceObj->start(); 
+        $serviceObj->enable(); 
+
+    }	
+
+    */
+    $serviceObj = $sm->getService($service);  
+    switch($action) {
+        case "start":
+            ($serviceObj->getStatus()) ? true : $serviceObj->start(); 
+            break; 
+        case "stop" :
+            ($serviceObj->getStatus()) ? $serviceObj->stop() : true ;
+            break; 
+        case "enable" :
+            $serviceObj->enable();
+            break;  
+        case "disable" :
+            $serviceObj->disable();
+            break; 
+        default: 
+            break;  
+
+    }
+
+
+    	$servicelist = array("smb","nfs","rsync","httpd","ldap",
+                        "proftpd","iscsi-target","upsd", 
+                        "upsmon", "open-iscsi","acpid","scst","qla2x00tgt","corosync"); 
+
+
+	generic_header(array("title" => _("Services Section")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+
+<?php
+	nested_tab_begin("C_SERVICES");
+    	print("<h3 align=\"center\">Manage Services</h3>\n");
+	print("<div align=\"center\">\n");
+	print("<table cellpadding=\"10\" cellspacing=\"2\" border=\"0\">\n");
+
+	print("<tr>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Service</strong></td>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Boot Status</strong></td>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Modify Boot</strong></td>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Current Status</strong></td>\n");    
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Start / Stop</strong></td>\n");    
+
+	print("</tr>\n");
+
+    $sm = new ServiceManager();  
+    foreach($servicelist as $service_name) {
+        $serviceObj = $sm->getService($service_name);  
+        $service_status = $serviceObj->getStatus(); 
+        $onboot = $serviceObj->onBoot(); 
+ 
+        print("<tr>\n");
+        print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\">" . $serviceObj->getMetaDescription() . "</td>\n");
+    	print("\t<td bgcolor=\"" . ($onboot ? $GLOBALS["color_table_green"] : $GLOBALS["color_table_amber"]) . "\" align=\"center\">" . ($onboot ? "Enabled" : "Disabled") . "</td>\n");
+	    print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\"><a href=\"services.html?service=" . $service_name . "&amp;action=" . ($onboot ? "disable" : "enable") . "\">"  . ($onboot ? "Disable" : "Enable") . "</a></td>\n");
+    	print("\t<td bgcolor=\"" . ($service_status != 0 ? $GLOBALS["color_table_green"] : $GLOBALS["color_table_amber"]). "\" align=\"center\">" . (($service_status != 0) ? "Running" : "Stopped") . "</td>\n");       
+	    print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\"><a href=\"services.html?service=" . $service_name . "&amp;action=" . ($service_status ? "stop" : "start") . "\">"  . ($service_status ? "Stop" : "Start") . "</a></td>\n");
+ 
+        print("</tr>\n");
+
+
+    }
+
+
+
+
+
+	print("</table>\n");
+	print("</div>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

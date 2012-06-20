@@ -1,0 +1,169 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    include("cluster.inc");
+    include("authenticated.inc");
+
+
+
+
+
+ 
+   
+
+    function tabActive($tab) {
+
+        $cookie = $_COOKIE["subNavIscsi-$tab"];
+        if ($cookie == "true")
+           return true;
+
+        return false;
+
+    }
+
+    generic_header(array("title" => _("Cluster : Status")));
+    single_begin(array());
+
+
+?>                
+
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+
+function setActiveTabCookie(tabName) {
+
+    var pageTabs = ["clusterstatus","blockreplicationstatus"];
+
+    for (i=0; i < pageTabs.length; i++)  {
+
+        if (tabName == pageTabs[i]) {
+
+            var cookieval = "subNavCluster-" + pageTabs[i];
+            document.cookie = ''+cookieval+' = '+true +'; path=/admin';
+            document.getElementById(pageTabs[i]).style.background="<?php print($GLOBALS["color_page_tab1_highlighted_background"]); ?>";
+            changeObjectVisibility(tabName+"container", 'visible');
+
+        }
+
+        else {
+
+            var cookieval = "subNavCluster-" + pageTabs[i];
+            document.cookie = ''+cookieval+' = '+ false +'; path=/admin';
+            document.getElementById(pageTabs[i]).style.background="<?php print($GLOBALS["color_page_tab1_regular_background"]); ?>";
+            changeObjectVisibility(pageTabs[i]+"container", 'hidden');
+        }
+    }
+}
+
+
+function showTab(tabName) {
+
+    setActiveTabCookie(tabName);
+    return false;
+}
+
+
+function readCookie(name) {
+
+    // courtesy of http://www.quirksmode.org/js/cookies.html
+    var nameEQ = name + "=";
+    var ca = document.cookie.split(';');
+    for(var i=0;i < ca.length;i++) {
+        var c = ca[i];
+        while (c.charAt(0)==' ') c = c.substring(1,c.length);
+        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+    }
+    return null;
+}
+
+    for (i=0; i < pageTabs.length; i++) {
+
+        var cookieString = "subNavCluster-"+ pageTabs[i];
+        if (readCookie(cookieString) == "true")
+            defaultTab = pageTabs[i];
+    }
+
+    showTab(defaultTab);
+}
+
+
+
+// -->
+</script>
+
+
+<?php
+        nested_tab_begin("C_CLUSTER");
+?>
+
+<table cellpadding="0" cellspacing="0" border="0" style="width: 95%;"><tr>
+<td id="page_nav" style="margin-left: auto; margin-right: auto;"><ul>
+<li id="clusterstatus" <?php if(tabActive("clusterstatus")) print("class=\"active\""); ?>><a href="#"  onclick="return showTab('clusterstatus');" >Cluster Status</a></li>
+<li id="blockreplicationstatus" <?php if(tabActive("blockreplicationstatus")) print("class=\"active\""); ?>><a href="#"  onclick="return showTab('blockreplicationstatus');" >Block Replication Status</a></li>
+</ul>
+</td></tr>
+</table>
+
+<?php
+
+	print("<div style=\" padding: 2em;\" id=\"clusterstatuscontainer\">\n");
+	$dvalue = $GLOBALS["color_table_row1"];
+	?>
+	<h3>Cluster Status</h3>
+	<?php
+	$clustat = new ClusterManager();
+	if ($clustat->isRunning) 
+		echo $clustat->printStatus();
+	else {
+		?>
+		<div style="width: 300px; margin-left: auto; margin-right: auto;">
+		<div class="messageblock messageblock-warning">
+			<div class="messageblock-internal">
+			<p>Cluster Manager Not Running</p>
+			</div>
+		</div>
+		</div>
+		<?php
+
+	}
+	print("</div>");
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

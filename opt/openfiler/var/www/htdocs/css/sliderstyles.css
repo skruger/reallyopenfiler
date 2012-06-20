@@ -1,0 +1,18 @@
+<?php header("Content-type: text/css"); ?>
+
+
+#slider-1 {
+	margin:	2px;
+	width:	auto;
+}
+
+#slider-2 {
+	margin:	2px;
+}
+
+#color-picker {
+	border:		0; /*1px solid rgb(90,97,90);*/
+	width:		350px;
+	height:		80px;
+}
+

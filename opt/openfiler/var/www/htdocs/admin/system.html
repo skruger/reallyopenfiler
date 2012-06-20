@@ -1,0 +1,428 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    require_once("network.inc");
+    require_once("ups.inc");
+    include("authenticated.inc");
+
+    generic_header(array("title" => _("System : Network Setup")));
+
+    single_begin(array());
+
+?>
+<script src="utility.js" type="text/javascript" language="JavaScript"></script>
+<script src="popup.js" type="text/javascript" language="JavaScript"></script>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_GENERAL");
+	if ($action=="removeslave"){
+		$bond = new Bond($bond);
+		$bond->RemoveSlave($slave);
+		header("Location: ./system.html");
+	}
+	else if ($action=="deletebond"){
+		$bond = new Bond($bond);
+		$bond->Remove();
+		header("Location: ./system.html");
+	}
+	else if ($action=="deletevif" || $action=="deletevlan"){
+		$device = new NetworkCard($nic);
+		$device->Remove();
+		header("Location: ./system.html");
+	}
+	else if ($action=="addvif"){
+		$device = new NetworkCard($nic);
+		$device->AddVIF();
+		header("Location: ./system.html");
+	}
+	else if ($action=="addvlan"){
+		$vid = intval($vid);
+		if ($eth && $vid){
+			$device = new VLAN($eth);
+			$device->AddVLAN($vid);
+		}
+		header("Location: ./system.html");
+	}
+
+	$net = new Network();
+	$acl = new NetworkAccessList();
+	if ($action == "setnetworks")
+	{
+		$ups = new UPS();
+
+		if ((strlen(trim($network)) > 0) && (strlen(trim($netmask)) > 0) && (strlen(trim($name)) > 0))
+			$acl->AddItem($name, $network, $netmask, $ntype);
+
+		// check network entries for possible deletions
+		foreach($acl->ListItems() as $item)
+			if (${(sha1($item["name"]) . "delete")} == "on")
+				$acl->RemoveItem($item["name"]);
+
+		// find all ups network entries with type ups
+		foreach($acl->ListItems() as $item)
+			if ($item["type"] == "ups")
+				$ups->AddEntry($item["name"], $item["network"], $item["netmask"]);
+
+		$ups->Save();
+		$acl->Save();
+	}
+
+	if ($netconf) {
+		if ($hostname)
+			$net->SetHostname($hostname);
+
+		if (!$net->IsDHCP()){
+			//only perform these actions if not using DHCP
+			if (($dns1) || ($dns2))
+				$net->SetDNS($dns1, $dns2);
+			$net->SetGateway($gateway);
+			$net->Restart();
+		}
+	}
+
+	if ((!$step) || ($cancel)){   // Default Page
+
+		$dns = $net->GetDNS();
+		if ($net->IsDHCP()){
+			$dhcp_html = "disabled=\"disabled\"";
+		}
+
+		print("<h3 align=\"center\">Network Configuration</h3>\n");
+		print("<form action=\"system.html\" method=\"post\">\n");
+		print("<table cellspacing=\"2\" cellpadding=\"8\" border=\"0\">");
+		print("<tr class=\"color_table_row1\">");
+		print("<td class=\"color_table_heading\" width=\"100\" align=\"right\">Hostname:</td>");
+		print("<td><input type=\"text\" name=\"hostname\" size=\"30\" value=\"" . $net->GetHostname() . "\"/></td></tr>\n");
+		print("<tr class=\"color_table_row2\">");
+		print("<td class=\"color_table_heading\" width=\"100\" align=\"right\">Primary DNS:</td>");
+		print("<td><input type=\"text\" name=\"dns1\" size=\"30\"  " . $dhcp_html . " value=\"" . $dns[0] . "\"/></td></tr>\n");
+		print("<tr class=\"color_table_row1\">");
+		print("<td class=\"color_table_heading\" width=\"100\" align=\"right\">Secondary DNS:</td>");
+		print("<td><input type=\"text\" name=\"dns2\" size=\"30\"  " . $dhcp_html . " value=\"" . $dns[1] . "\"/></td></tr>\n");
+		print("<tr class=\"color_table_row2\">");
+		print("<td class=\"color_table_heading\" align=\"right\">Gateway:</td>");
+		if ($dhcp_html)
+			print("<td><input type=\"text\" name=\"gateway\" size=\"30\"  " . $dhcp_html . " value=\"DHCP Controlled\"/></td></tr>\n");
+		else
+			print("<td><input type=\"text\" name=\"gateway\" size=\"30\"  value=\"" . $net->GetGateway() . "\"/></td></tr>\n");
+		//print("<tr bgcolor='" . ($GLOBALS["color_table_heading"]) . "'>");
+                print("</table><br />");
+		print("<input type=\"submit\" name=\"netconf\" value=\"Update\"/>&nbsp;");
+		print("<input type=\"reset\" value=\"Cancel\"/>");
+		print("</form>");
+		print("<br /><br />\n");
+
+
+		print("<h3 align=\"center\">Network Interface Configuration</h3>\n");
+
+		$dcolor = 0;
+
+		print("<table cellspacing=\"2\" cellpadding=\"8\" border=\"0\"><tr bgcolor=\"" . ($GLOBALS["color_table_heading"]) . "\"><td><strong>Interface</strong></td><td><strong>Boot Protocol</strong></td><td><strong>IP Address</strong></td><td><strong>Network Mask</strong></td><td><strong>Speed</strong></td><td><strong>MTU</strong></td><td><strong>Link</strong></td><td><strong>Edit</strong></td></tr>");
+		foreach ($net->ListDevices() as $device){
+			$interface = new NetworkCard($device);
+
+			if ($dcolor++ % 2)
+				$dvalue = $GLOBALS["color_table_row2"];
+			else
+				$dvalue = $GLOBALS["color_table_row1"];
+
+			if ($interface->IsMaster())
+				$type="bond";
+			else if ($interface->IsVirtual())
+				$type="vif";
+			else if ($interface->IsVLAN())
+				$type="vlan";
+			else
+				$type="eth";
+
+			print("<tr bgcolor=\"" . $dvalue . "\"><td><a href=\"#\" onclick=\"return !showPopup('" . $type . $interface->GetDevice() . "', event);\">" . $interface->GetDevice() . "</a></td>");
+			if ($interface->IsSlave()){
+				print("<td colspan=5><i>Configured as slave to bond: " . $interface->GetMaster() . "</i></td>");
+				if ($interface->IsConnected())
+					print("<td>Yes</td>");
+				else
+					print("<td>No</td>");
+			}
+			else{
+				if ($interface->IsEnabled()){
+					if ($interface->IsDHCP())
+						print("<td>DHCP</td>");
+					else
+						print("<td>Static</td>");
+					print("<td>" . $interface->GetIP() . "</td>");;
+					print("<td>" . $interface->GetMask() . "</td>");
+					print("<td>" . $interface->GetSpeed() . "</td>");
+					print("<td>" . $interface->GetMTU() . "</td>");
+				}
+				else {  //not enabled
+					print("<td>Disabled</td>");
+					print("<td>-</td>");
+					print("<td>-</td>");
+					print("<td>-</td>");
+					print("<td>-</td>");
+				}
+					if ($interface->IsConnected())
+						print("<td>Yes</td>");
+					else
+						print("<td>No</td>");
+			}
+			print("<td><a style=\"text-decoration: none;\" href=\"?step=2&amp;device=" . $interface->GetDevice() . "\"><img src=\"/images/icons/edit_icon.png\" alt=\"edit icon\" border=\"0\" />Configure</a></td></tr>");
+
+
+		}
+
+
+		//if (!$net->ListBonds()){
+			print("<tr bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><td colspan=\"8\" align=\"center\"><a href=\"bonding.html\">Create bonded interface</a></td></tr>");
+		//}
+		print("</table><br /><br />\n");
+
+		foreach ($net->ListBonds() as $bond){
+			$master = new Bond($bond);
+			print("<div id=\"bond" . $bond . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"sharespopup\" style=\"background:" . $GLOBALS["color_inner_body"] . "; width: 450px\">");
+			print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">");
+			print("<tr><td valign=\"bottom\" colspan=\"2\"><br /><font size=\"+1\"><strong>" . $master->GetDevice() . "</strong></font></td><td valign=\"bottom\" colspan=3>");
+			print("<a href=\"?action=deletebond&amp;bond=" . $master->GetDevice() . "\"><img src=\"/images/icons/off_icon.png\" />Delete</a></td></tr>");
+			print("<tr bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><td>&nbsp;</td><td><b>Slave Device</b></td><td><b>Status</b></td><td><b>Failure Count</b></td><td><b>Action</b></td></tr>");
+			foreach ($master->ListSlaves() as $slave){
+				print("<tr bgcolor=\"$dvalue\"><td></td><td>" . $slave . "</td><td>" . $master->GetSlaveStatus($slave) . "</td><td>" . $master->GetSlaveFailureCount($slave) . "</td><td><a href=\"?action=removeslave&amp;bond=" . $master->GetDevice() . "&amp;slave=" . $slave . "\">Remove from bond</a></td></tr>");
+
+				if ($dcolor++ % 2) $dvalue = $GLOBALS["color_table_row2"];
+				else $dvalue = $GLOBALS["color_table_row1"];
+			}
+			print("<tr bgcolor=\"$dvalue\"><td colspan=\"4\">&nbsp;</td><td><a href=bonding.html?action=addslave&amp;bond=" . $master->GetDevice() . ">Add slave</a></td></tr>");
+			print("</table><br />\n");
+			print("</div>");
+		}
+
+		foreach ($net->ListNICs() as $NIC){
+			$device = new NetworkCard($NIC);
+			$dvalue = $GLOBALS["color_table_row1"];
+			print("<div id=\"eth" . $device->GetDevice() . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"sharespopup\" style=\"background:" . $GLOBALS["color_inner_body"] . "; width: 450px\">");
+			print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">");
+			print("<tr><td valign=\"bottom\" colspan=\"1\"><br /><font size=\"+1\"><strong>Network Card: " . $device->GetDevice() . "</strong></font></td><td valign=\"bottom\" colspan=\"1\"></td></tr>");
+			print("<tr bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><td><b>Attribute</b></td><td><b>Value</b></td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>MAC Address</td><td>" . $device->GetMAC() . "</td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>Bytes Recieved</td><td>" . $device->GetRxBytes() . "</td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>Bytes Sent</td><td>" . $device->GetTxBytes() . "</td></tr>");
+			$dvalue = $GLOBALS["color_table_row2"];
+			print("<tr bgcolor=\"$dvalue\"><td colspan=\"2\" align=\"center\"><a href=\"?step=addvlan&amp;nic=" . $device->GetDevice() . "\">Add VLAN</a><br /><a href=\"?action=addvif&amp;nic=" . $device->GetDevice() . "\">Add Virtual Interface</a></td></tr>");
+			print("</table><br />\n");
+			print("</div>");
+		}
+
+		foreach ($net->ListVIFs() as $vinterface){
+			$device = new NetworkCard($vinterface);
+			$dvalue = $GLOBALS["color_table_row1"];
+			print("<div id=\"vif" . $device->GetDevice() . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"sharespopup\" style=\"background:" . $GLOBALS["color_inner_body"] . "; width: 450px\">");
+			print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">");
+			print("<tr><td valign=\"bottom\" colspan=\"1\"><br /><font size=\"+1\"><strong>Virtual Interface: " . $device->GetDevice() . "</strong></font></td><td valign=\"bottom\" colspan=\"1\"></td></tr>");
+			print("<tr bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><td><b>Attribute</b></td><td><b>Value</b></td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>MAC Address</td><td>" . $device->GetMAC() . "</td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>Bytes Received</td><td>" . $device->GetRxBytes() . "</td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>Bytes Sent</td><td>" . $device->GetTxBytes() . "</td></tr>");
+			$dvalue = $GLOBALS["color_table_row2"];
+			print("<tr bgcolor=\"$dvalue\"><td colspan=\"2\" align=\"center\"><a href=\"?action=deletevif&amp;nic=" . $device->GetDevice() . "\">Remove Virtual Interface</a></td></tr>");
+			print("</table><br />\n");
+			print("</div>");
+		}
+
+		foreach ($net->ListVLANs() as $vinterface){
+			$device = new NetworkCard($vinterface);
+			$dvalue = $GLOBALS["color_table_row1"];
+			print("<div id=\"vlan" . $device->GetDevice() . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"sharespopup\" style=\"background:" . $GLOBALS["color_inner_body"] . "; width: 450px\">");
+			print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">");
+			print("<tr><td valign=\"bottom\" colspan=\"1\"><br /><font size=\"+1\"><strong>VLAN: " . $device->GetDevice() . "</strong></font></td><td valign=\"bottom\" colspan=\"1\"></td></tr>");
+			print("<tr bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><td><b>Attribute</b></td><td><b>Value</b></td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>MAC Address</td><td>" . $device->GetMAC() . "</td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>Bytes Received</td><td>" . $device->GetRxBytes() . "</td></tr>");
+			print("<tr bgcolor=\"$dvalue\"><td>Bytes Sent</td><td>" . $device->GetTxBytes() . "</td></tr>");
+			$dvalue = $GLOBALS["color_table_row2"];
+			print("<tr bgcolor=\"$dvalue\"><td colspan=\"2\" align=\"center\"><a href=\"?action=deletevlan&amp;nic=" . $device->GetDevice() . "\">Remove VLAN</a></td></tr>");
+			print("</table><br />\n");
+			print("</div>");
+		}
+
+
+		print("<h3 align=\"center\">Network Access Configuration</h3>\n");
+
+		print("<form action=\"system.html\" method=\"post\">\n");
+		print("<input type=\"hidden\" name=\"action\" value=\"setnetworks\" />\n");
+
+		print("<div align=\"center\">\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	?>
+		<tr>
+			<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Delete</strong></td>
+			<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Name</strong></td>
+			<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Network/Host</strong></td>
+			<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Netmask</strong></td>
+			<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Type</strong></td>
+		</tr>
+<?php
+
+		$dcolor = 0;
+
+		foreach ($acl->ListItems() as $item)
+		{
+			if ($dcolor++ % 2)
+				$dvalue = $GLOBALS["color_table_row2"];
+			else
+				$dvalue = $GLOBALS["color_table_row1"];
+
+			print("<tr>\n");
+
+			print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"checkbox\" name=\"" . sha1($item["name"]) . "delete\" /></td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\">" . $item["name"] . "</td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\">" . $item["network"] . "</td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\">" . $item["netmask"] . "</td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\">" . (($item[type] == "share") ? "Share" : "UPS") . "</td>\n");
+			print("</tr>\n");
+		}
+
+		$dvalue = $GLOBALS["color_table_heading"];
+
+		print("<tr>\n");
+		print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\">New</td>\n");
+		print("\t<td bgcolor=\"" . $dvalue . "\"><input type=\"text\" name=\"name\" size=\"10\" /></td>\n");
+		print("\t<td bgcolor=\"" . $dvalue . "\"><input type=\"text\" name=\"network\" size=\"10\" /></td>\n");
+		print("\t<td bgcolor=\"" . $dvalue . "\">\n");
+		print("\t\t<select name=\"netmask\">\n");
+
+		foreach ($net->GenerateNetmasks() as $mask){
+			print("\t\t\t<option>" . $mask . "</option>\n");
+		}
+
+		print("\t\t</select>\n");
+		print("\t</td>\n");
+		print("\t<td bgcolor=\"" . $dvalue . "\"><select name=\"ntype\"><option value=\"share\">Share</option><option value=\"ups\">UPS</option></select></td>\n");
+		print("</tr>\n");
+
+		print("</table>\n");
+		print("</div>\n");
+
+		print("<p align=\"center\"><input type=\"submit\" name=\"submit\" value=\"Update\" /></p>\n");
+		print("</form>\n");
+
+	}
+	elseif ($step=="addvlan"){
+		$interface = new NetworkCard($nic);
+		print("<h3 align=\"center\">VLAN Interface Configuration</h3>\n");
+		print("<form action=\"system.html\" name=\"configure\" method=\"post\">\n");
+		print("<input type=\"hidden\" name=\"step\" value=\"2\"/>\n");
+		print("<input type=\"hidden\" name=\"action\" value=\"addvlan\"/>\n");
+		print("<input type=\"hidden\" name=\"eth\" value=\"" . $interface->GetDevice() . "\"/>\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+		print("\t<tr><td  bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" align=\"right\">Physical Device</td><td bgcolor=\"" . $GLOBALS["color_table_row2"] ."\" >" . $interface->GetDevice() . "</td></tr>\n");
+		print("\t<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" align=\"right\">VLAN ID</td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] ."\" ><input type=\"text\" name=\"vid\" size=\"6\"/></td></tr>\n");
+		print("</table><br />\n");
+		print("<input type=\"submit\" name=\"submit\" value=\"Continue\"/>\n");
+		print("<input type=\"submit\" name=\"cancel\" value=\"Cancel\"/>\n");
+		print("</form>\n");
+	}
+	elseif ($step==2){
+		$interface = new NetworkCard($device);
+		print("<h3 align=\"center\">Network Interface Configuration</h3>\n");
+
+		print("<form action=\"system.html\" name=\"configure\" method=\"post\">\n");
+		print("<input type=\"hidden\" name=\"step\" value=\"3\"/>\n");
+		print("<input type=\"hidden\" name=\"device\" value=\"" . $interface->GetDevice() . "\"/>\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\">\n");
+		print("\t<tr><td class=\"color_table_heading\" align=\"right\">Device:</td><td class=\"color_table_row2\">" . $interface->GetDevice() . "</td></tr>\n");
+		print("\t<tr><td class=\"color_table_heading\" align=\"right\">Boot Protocol:</td>\n");
+		print("\t<td class=\"color_table_row1\"><select name=\"dhcp\">\n");
+		if($interface->IsDHCP())
+			print("\t\t<option value=\"1\" selected=\"selected\">DHCP<option value=\"0\">Static</option>\n");
+		else
+			print("\t\t<option value=\"1\">DHCP<option value=\"0\" selected=\"selected\">Static</option>\n");
+		print("\t</select></td></tr>\n");
+		print("</table><br />\n");
+		print("<input type=\"submit\" name=\"submit\" value=\"Continue\"/>\n");
+		print("<input type=\"submit\" name=\"cancel\" value=\"Cancel\"/>\n");
+		print("</form>\n");
+	}
+	elseif ($step==3){
+		$interface = new NetworkCard($device);
+		print("<h3 align=\"center\">Network Interface Configuration</h3>\n");
+
+		print("<form name=\"configure\" method=\"post\">\n");
+		print("<input type=\"hidden\" name=\"step\" value=\"4\"/>\n");
+		print("<input type=\"hidden\" name=\"dhcp\" value=\"" . $dhcp . "\"/>\n");
+		print("<input type=\"hidden\" name=\"device\" value=\"" . $interface->GetDevice() . "\"/>\n");
+		print("<table cellspacing=\"2\" cellpadding=\"8\" border=\"0\">\n");
+		print("\t<tr><td class=\"color_table_heading\" align=\"right\">Device:</td><td class=\"color_table_row1\">" . $interface->GetDevice() . "</td></tr>\n");
+		if ($dhcp){
+			print("\t<tr><td align='right'>Boot Protocol</td><td>DHCP</td></tr>\n");
+		}
+		else{
+			print("\t<tr><td class=\"color_table_heading\" align='right'>IP Address:</td><td class=\"color_table_row2\"><input type=\"text\" name=\"ip\" value=\"" . $interface->GetIP() . "\"/></td></tr>\n");
+			print("\t<tr><td class=\"color_table_heading\" align='right'>Netmask:</td><td class=\"color_table_row1\"><select name='netmask'>\n");
+			$mask = $interface->GetMask();
+			foreach ($interface->GenerateNetmasks() as $netmask){
+				if ($mask == $netmask)
+					print("\t\t<option value='" . $netmask . "' selected='selected'>$netmask</option>\n");
+				else
+					print("\t\t<option value='" . $netmask . "'>$netmask</option>\n");
+			}
+			print("\t</select></td></tr>\n");
+		}
+		print("\t<tr><td class=\"color_table_heading\" align=\"right\">MTU:</td><td class=\"color_table_row2\"><select name=\"mtu\">\n");
+			if ($interface->GetMTU() == 9000)
+				print("\t\t<option value=\"1500\">1500</option><option value=\"7000\">7000</option><option value=\"9000\" selected=\"selected\">9000</option>\n");
+			elseif ($interface->GetMTU() == 7000)
+				print("\t\t<option value=\"1500\">1500</option><option value=\"7000\" selected=\"selected\">7000</option><option value=\"9000\">9000</option>\n");
+			else
+				print("\t\t<option value=\"1500\" selected=\"selected\">1500</option><option value=\"7000\">7000</option><option value=\"9000\">9000</option>\n");
+		print("\t</select></td></tr>\n");
+		print("</table><br />\n");
+		print("<input type=\"submit\" name=\"submit\" value=\"Confirm\"/>\n");
+		print("<input type=\"submit\" name=\"cancel\" value=\"Cancel\"/>\n");
+		print("</form>\n");
+
+	}
+	elseif ($step==4){
+		$interface = new NetworkCard($device);
+		print("<h3 align=\"center\">Network Interface Configuration</h3>\n");
+
+		print("Configuration Updated.<br />\n");
+		print("<a href=system.html>Return to Network Page.</a><br />\n");
+		$interface->Save($dhcp, $ip, $netmask, $mtu);
+		$interface->Restart();
+	}
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

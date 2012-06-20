@@ -1,0 +1,5 @@
+php_value include_path ".:/opt/openfiler/var/www/includes:/usr/lib/php"
+php_value register_globals On
+php_value max_execution_time 0
+php_value magic_quotes_gpc Off
+php_value default_charset UTF-8

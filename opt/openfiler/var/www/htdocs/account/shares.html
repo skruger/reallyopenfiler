@@ -1,0 +1,233 @@
+<?php
+
+/*
+ * General users' section
+ *
+ * Copyright (C) 2006 Voluna Software. All rights reserved.
+ *
+ */
+
+	require("pre.inc");
+
+	if ($GLOBALS["authenticated"] == 0)
+	{
+		generic_header(array("title" => _("Your account")));
+		dual_begin(array());
+		print("<h2><a href=\"/\">" . _("Home") . "</a> / " . _("Your account") . "</h2>\n");
+		print("<p>" . _("You have not authenticated yourself to the system yet with your") . " <em>" . _("username") . "</em> " . _("and") . " <em>" . _("password") . "</em>. " .
+			_("You will not be able to use this section of the website without authenticating yourself first. So, please continue and login using the form on the right hand side.") . "</p>\n");
+		dual_middle(array());
+		show_account_details(array());
+		dual_end(array());
+		generic_footer(array());
+		exit;
+	}
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+
+	function volumes_startelement($parser, $name, $attrs)
+	{
+		global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg;
+
+		if ($name == "VOLUME")
+		{
+			array_push($volumes_id, $attrs["ID"]);
+			array_push($volumes_name, $attrs["NAME"]);
+			array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+			array_push($volumes_vg, $attrs["VG"]);
+		}
+	}
+
+	function volumes_endelement($parser, $name)
+	{
+	}
+
+	$volumes_parser = xml_parser_create();
+	xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+	$volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+	while ($volumes_data = fread($volumes_fp, 4096))
+		xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+	fclose($volumes_fp);
+	xml_parser_free($volumes_parser);
+
+	generic_header(array("title" => _("Your account")));
+	single_begin(array());
+	print("<h2><a href=\"/\">" . _("Home") . "</a> / " . _("Your account") . "</h2>\n");
+
+?>
+
+<p>Hi <?php print($usercookie); ?>! The following are your account information and preferences, arranged
+into tabs. Please click on a tab to open up that category.</p>
+
+<?php
+	tab_begin(4, 0, array("Quota", "Password", "Language", "Logout"), array("./", "password.html", "language.html", "logout.html"));
+
+$qp = popen("/usr/bin/sudo /usr/bin/quota -v " . escapeshellarg($usercookie), "r");
+
+$i = 0;
+while (!feof($qp))
+{
+	$str = fgets($qp, 4096);
+
+	if (strlen($str) > 0)
+	{
+		$q[$i] = $str;
+		$i++;
+	}
+}
+
+pclose($qp);
+
+$totalquota = 0;
+$totalfiles = 0;
+$userquota = 0;
+$userfiles = 0;
+
+if (count($q) > 2)
+{
+	for ($i = 2; $i < count($q); $i++)
+	{
+		$string = substr($q[$i], 0, strlen($q[$i]) - 1);
+		$string = trim($string, " ");
+		$strarray = explode(" ", $string);
+		$finalarray = array();
+
+		foreach ($strarray as $strelement)
+		{
+			$element = trim($strelement);
+			if (strlen($element) == 0)
+				continue;
+			else
+				array_push($finalarray, $element);
+		}
+
+		$count = count($finalarray);
+		switch($count)
+		{
+			case 7:	$qarray = array($finalarray[0], $finalarray[1], $finalarray[2], $finalarray[3], "", $finalarray[4], $finalarray[5], $finalarray[6], "");
+				break;
+			case 8: $qarray = array($finalarray[0], $finalarray[1], $finalarray[2], $finalarray[3], $finalarray[4], $finalarray[5], $finalarray[6], $finalarray[7], "");
+				break;
+			case 9: $qarray = array($finalarray[0], $finalarray[1], $finalarray[2], $finalarray[3], $finalarray[4], $finalarray[5], $finalarray[6], $finalarray[7], $finalarray[8]);
+				break;
+			default: print("Don't know how to handle this quota!\n");
+		}
+
+		$totalquota += intval($qarray[3]);
+		$userquota += intval($qarray[1]);
+		$totalfiles += intval($qarray[7]);
+		$userfiles += intval($qarray[5]);
+
+	}
+
+$freequota = $totalquota - $userquota;
+$freefiles = $totalfiles - $userfiles;
+
+if ($freequota < 0)
+	$freequota = 0;
+
+if ($freefiles < 0)
+	$freefiles = 0;
+
+?>
+	<div align="center">
+	<table cellpadding="20" cellspacing="0" border="0">
+	<tr>
+		<td valign="top"><p align="center"><strong>Block usage</strong></p>
+		<p><img src="pie.php?phi=25&width=210&amp;height=280&amp;scale=3&amp;units=blocks&amp;count=2&amp;value0=<?php print($userquota); ?>&amp;value1=<?php print($freequota); ?>&amp;str0=Used&amp;str1=Free" /></p>
+		</td>
+		<td valign="top"><p align="center"><strong>File usage</strong></p>
+		<p><img src="pie.php?phi=25&width=210&amp;height=280&amp;scale=3&amp;units=inodes&amp;count=2&amp;value0=<?php print($userfiles); ?>&amp;value1=<?php print($freefiles); ?>&amp;str0=Used&amp;str1=Free" /></p>
+		</td>
+	</tr>
+	</table>
+	</div>
+
+	<div align="center">
+	<table cellpadding="8" cellspacing="2" border="0">
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center" colspan="9"><strong>Disk quotas for user <?php print($usercookie); ?></strong></td>
+	</tr>
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Volume</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Used Blocks</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Allowed Blocks</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Used Files</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Allowed Files</strong></td>
+	</tr>
+<?php
+
+if (count($q) > 2)
+{
+	$dcolor = 0;
+
+	for ($i = 2; $i < count($q); $i++)
+	{
+		$string = substr($q[$i], 0, strlen($q[$i]) - 1);
+		$string = trim($string, " ");
+		$strarray = explode(" ", $string);
+		$finalarray = array();
+
+		foreach ($strarray as $strelement)
+		{
+			$element = trim($strelement);
+			if (strlen($element) == 0)
+				continue;
+			else
+				array_push($finalarray, $element);
+		}
+
+		$count = count($finalarray);
+		switch($count)
+		{
+			case 7:	$qarray = array($finalarray[0], $finalarray[1], $finalarray[2], $finalarray[3], "", $finalarray[4], $finalarray[5], $finalarray[6], "");
+				break;
+			case 8: $qarray = array($finalarray[0], $finalarray[1], $finalarray[2], $finalarray[3], $finalarray[4], $finalarray[5], $finalarray[6], $finalarray[7], "");
+				break;
+			case 9: $qarray = array($finalarray[0], $finalarray[1], $finalarray[2], $finalarray[3], $finalarray[4], $finalarray[5], $finalarray[6], $finalarray[7], $finalarray[8]);
+				break;
+			default: print("Don't know how to handle this quota!\n");
+		}
+
+		for ($j = 0; $j < count($volumes_id); $j++)
+			if (strcmp($qarray[0], "/dev/" . $volumes_vg[$j] . "/" . $volumes_id[$j]) == 0)
+			{
+				if ($dcolor == 0)
+				{
+					$dcolor = 1;
+					$dvalue = $GLOBALS["color_table_row1"];
+				}
+				else
+				{
+					$dcolor = 0;
+					$dvalue = $GLOBALS["color_table_row2"];
+				}
+
+				print("<tr>\n");
+				print("\t<td bgcolor=\"" . $dvalue . "\">" . $volumes_name[$j] . "</td>\n");
+				print("\t<td bgcolor=\"" . $dvalue . "\">" . $qarray[1] . "</td>\n");
+				print("\t<td bgcolor=\"" . $dvalue . "\">" . (($qarray[2] <= 0) ? "<em>No limit</em>" : $qarray[2]) . "</td>\n");
+				print("\t<td bgcolor=\"" . $dvalue . "\">" . $qarray[5] . "</td>\n");
+				print("\t<td bgcolor=\"" . $dvalue . "\">" . (($qarray[6] <= 0) ? "<em>No limit</em>" : $qarray[6]) . "</td>\n");
+				print("</tr>\n");
+				break;
+			}
+	}
+}
+
+?>
+	</table>
+	</div>
+
+<?php
+}
+	tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

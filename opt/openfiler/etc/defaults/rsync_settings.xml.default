@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<rsync>
+  <port number="873"/>
+  <motd file="/opt/openfiler/etc/rsync.motd"/>
+  <address ip=""/>
+</rsync>

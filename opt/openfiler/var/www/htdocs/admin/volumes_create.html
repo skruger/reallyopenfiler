@@ -1,0 +1,625 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+        include("authenticated.inc");
+
+
+	if ($vgname)
+	    setcookie("vg-name", $vgname);
+	else
+	    $vgname = $_COOKIE['vg-name'];
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+	$volumes_fstype = array();
+
+
+	function volumes_startelement($parser, $name, $attrs)
+	{
+		global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg, $volumes_fstype;
+
+
+		if ($name == "VOLUME")
+		{
+			array_push($volumes_id, $attrs["ID"]);
+			array_push($volumes_name, $attrs["NAME"]);
+			array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+			array_push($volumes_vg, $attrs["VG"]);
+			array_push($volumes_fstype, $attrs["FSTYPE"]);
+
+		}
+	}
+
+	function volumes_endelement($parser, $name)
+	{
+	}
+
+	$volumes_parser = xml_parser_create();
+	xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+	$volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+	while ($volumes_data = fread($volumes_fp, 4096))
+		xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+	fclose($volumes_fp);
+	xml_parser_free($volumes_parser);
+
+	$vgp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "vgdisplay -c", "r");
+	$i = 0;
+	while (!feof($vgp))
+		$vgds[$i++] = fgets($vgp, 4096);
+	pclose($vgp);
+
+	if (($i == 0) || (($i == 1) && (strlen($vgds[0]) == 0)))
+	{
+		header("Location: ./volumes_vgmanage.html");
+		exit;
+	}
+
+	if (strlen($vgname) <= 0)
+	{
+		$vginfo = explode(":", trim($vgds[0], " "));
+		$vgname = $vginfo[0];
+	}
+
+	$snapshots_id = array();
+	$snapshots_lvname = array();
+	$snapshots_vgname = array();
+	$snapshots_shared = array();
+	$snapshots_rotateid = array();
+
+	$schedule_size = array();
+	$schedule_share = array();
+	$schedule_timecounter = array();
+	$schedule_timemax = array();
+	$schedule_rotatecounter = array();
+	$schedule_rotatemax = array();
+	$schedule_lvname = array();
+	$schedule_vgname = array();
+
+	function snapshots_startelement($parser, $name, $attrs)
+	{
+		global $snapshots_id, $snapshots_lvname, $snapshots_vgname, $snapshots_shared, $snapshots_rotateid;
+		global $schedule_size, $schedule_share;
+		global $schedule_timecounter, $schedule_timemax;
+		global $schedule_rotatecounter, $schedule_rotatemax;
+		global $schedule_lvname, $schedule_vgname;
+
+		if ($name == "SNAPSHOT")
+		{
+			array_push($snapshots_id, $attrs["ID"]);
+			array_push($snapshots_lvname, $attrs["LVNAME"]);
+			array_push($snapshots_vgname, $attrs["VGNAME"]);
+			array_push($snapshots_shared, $attrs["SHARED"]);
+			array_push($snapshots_rotateid, $attrs["ROTATEID"]);
+		}
+		else if ($name == "SCHEDULE")
+		{
+			array_push($schedule_size, $attrs["SIZE"]);
+			array_push($schedule_share, $attrs["SHARE"]);
+			array_push($schedule_timecounter, $attrs["TIMECOUNTER"]);
+			array_push($schedule_timemax, $attrs["TIMEMAX"]);
+			array_push($schedule_rotatecounter, $attrs["ROTATECOUNTER"]);
+			array_push($schedule_rotatemax, $attrs["ROTATEMAX"]);
+			array_push($schedule_lvname, $attrs["LVNAME"]);
+			array_push($schedule_vgname, $attrs["VGNAME"]);
+		}
+	}
+
+	function snapshots_endelement($parser, $name)
+	{
+	}
+
+	$snapshots_parser = xml_parser_create();
+	xml_set_element_handler($snapshots_parser, "snapshots_startelement", "snapshots_endelement");
+	$snapshots_fp = fopen("/opt/openfiler/etc/snapshots.xml", "r");
+
+	while ($snapshots_data = fread($snapshots_fp, 4096))
+		xml_parse($snapshots_parser, $snapshots_data, feof($snapshots_fp));
+
+	fclose($snapshots_fp);
+	xml_parser_free($snapshots_parser);
+
+
+	global $cluster_enabled, $cluster_nodename, $cluster_resource;
+
+	$cluster_enabled = false;
+	$cluster_nodename = "";
+	$cluster_resource = array();
+
+	function cluster_startelement($parser, $name, $attrs)
+	{
+		global $cluster_enabled, $cluster_nodename, $cluster_resource;
+
+		if ($name == "CLUSTERING")
+		{
+			if ($attrs["STATE"] == "on")
+				$cluster_enabled = true;
+			else
+				$cluster_enabled = false;
+		}
+		else if ($name == "NODENAME")
+			$cluster_nodename = $attrs["VALUE"];
+		else if ($name == "RESOURCE")
+			array_push($cluster_resource, $attrs["VALUE"]);
+	}
+
+	function cluster_endelement($parser, $name)
+	{
+	}
+
+	$cluster_parser = xml_parser_create();
+	xml_set_element_handler($cluster_parser, "cluster_startelement", "cluster_endelement");
+	$cluster_fp = fopen("/opt/openfiler/etc/cluster.xml", "r");
+
+	while ($cluster_data = fread($cluster_fp, 4096))
+		xml_parse($cluster_parser, $cluster_data, feof($cluster_fp));
+
+	fclose($cluster_fp);
+	xml_parser_free($cluster_parser);
+
+
+	if ($_POST["action"] == "Create")
+	{
+		if ((!is_valid_foldername($volumename)) || (substr($volumename, 0, 12) == "of.snapshot."))
+		{
+			header("Location: ./volumes.html");
+			exit;
+		}
+
+		if (strlen($_POST["volumedescription"]) <= 0)
+			$volumedescription = $volumename;
+
+		$volumename = strtolower($volumename);
+
+		if ($fstype != "iscsi")
+			$mountpath = "/mnt/" . $vgname . "/" . $volumename;
+		else
+			$mountpath = "";
+
+		$exists = FALSE;
+
+		for ($i = 0; $i < count($volumes_id); $i++)
+			if (($volumes_id[$i] == $volumename) && ($volumes_vg[$i] == $vgname))
+			{
+				$exists = TRUE;
+				break;
+			}
+
+		if ((!$exists) && (!is_dir($mountpath)) && (!is_file($mountpath)))
+		{
+			if ($fstype == "reiserfs" && $reqspace <= 33)
+			{
+				// volume size is too small for reiserfs
+				true;
+			}
+			else
+			{
+				exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvcreate -L " . escapeshellarg($reqspace) . " -n " . escapeshellarg($volumename) . " " . escapeshellarg($vgname));
+
+				$lvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvdisplay -c /dev/" . escapeshellarg($vgname) . "/" . escapeshellarg($volumename), "r");
+				$i = 0;
+				while (!feof($lvp))
+					$lvds[$i++] = fgets($lvp, 4096);
+				pclose($lvp);
+
+				$lvinfo = explode(":", trim($lvds[0], " "));
+
+				if ($lvinfo[0] == ("/dev/" . $vgname . "/" . $volumename))
+				{
+					if ($fstype != "iscsi")
+					{
+						$fs = 0;
+						$fsfound = false;
+
+						for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+						{
+							if ($fs_info[$fsi]["type"] == $fstype)
+							{
+								$fs = $fsi;
+								$fsfound = true;
+								break;
+							}
+						}
+
+						if ($fsfound == false)
+							$fs = 0;
+
+						exec("export LANG=C; /usr/bin/sudo " . $fs_info[$fs]["mkfs_command"] . " /dev/" . escapeshellarg($vgname) . "/" . escapeshellarg($volumename));
+						exec("export LANG=C; /usr/bin/sudo /bin/mkdir -p " . escapeshellarg($mountpath));
+					}
+
+					array_push($volumes_id, $volumename);
+					array_push($volumes_name, urldecode($volumedescription));
+					array_push($volumes_vg, $vgname);
+
+					if ($fstype != "iscsi")
+					{
+						array_push($volumes_fstype, $fs_info[$fs]["type"]);
+						array_push($volumes_mountpoint, $mountpath . "/");
+					}
+					else
+					{
+						array_push($volumes_fstype, "iscsi");
+						array_push($volumes_mountpoint, "");
+					}
+
+					$volumesp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/volumes.xml", "w");
+					fputs($volumesp, "<?xml version=\"1.0\" ?>\n");
+					fputs($volumesp, "<volumes>\n");
+					for ($i = 0; $i < count($volumes_id); $i++)
+						fputs($volumesp, "\t<volume id=\"" . htmlentities($volumes_id[$i]) . "\" name=\"" . htmlentities($volumes_name[$i]) . "\" mountpoint=\"" . htmlentities($volumes_mountpoint[$i]) . "\" vg=\"" . htmlentities($volumes_vg[$i]) . "\" fstype=\"" . htmlentities($volumes_fstype[$i]) . "\" />\n");
+
+					fputs($volumesp, "</volumes>\n\n");
+					pclose($volumesp);
+
+					if (!$cluster_enabled)
+					{
+						if ($fstype != "iscsi")
+						{
+							$fstabp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee -a /etc/fstab", "w");
+							fputs($fstabp, "/dev/" . $vgname . "/" . $volumename . " " . $mountpath . " " . $fs_info[$fs]["type"] . " " . $fs_info[$fs]["mount_options"] . " 0 0\n");
+							pclose($fstabp);
+						}
+					}
+					else
+					{
+						$service_winbind = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service winbind status"), "running") ? 1 : 0);
+						$service_smb = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service smb status"), "running") ? 1 : 0);
+						$service_nfsv3 = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service nfs status"), "running") ? 1 : 0);
+						$service_http = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service httpd status"), "running") ? 1 : 0);
+                                                $service_ftp = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd status"), "running") ? 1 : 0);
+                                                $service_rsync = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service rsync status"), "running") ? 1 : 0);
+                                                $service_iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+
+						$clusterp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/ha.d/haresources", "w");
+
+						$cluster_resource_str = "";
+
+						for ($i = 0; $i < count($cluster_resource); $i++)
+							$cluster_resource_str .= " " . $cluster_resource[$i];
+
+						for ($i = 0; $i < count($volumes_id); $i++)
+						{
+							$fstype = $volumes_fstype[$i];
+
+							if ($fstype != "iscsi")
+							{
+								$fs = 0;
+								$fsfound = false;
+
+								for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+								{
+									if ($fs_info[$fsi]["type"] == $fstype)
+									{
+										$fs = $fsi;
+										$fsfound = true;
+										break;
+									}
+								}
+
+								if ($fsfound == false)
+									$fs = 0;
+
+								$cluster_resource_str .= " Filesystem::/dev/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . "/mnt/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["mount_options"];
+							}
+						}
+
+						for ($i = 0; $i < count($snapshots_id); $i++)
+						{
+							$fstype = "";
+
+							for ($fsj = 0; $fsj < count($volumes_id); $fsj++)
+							{
+								if (($snapshots_vgname[$i] == $volumes_vg[$fsj]) && ($snapshots_lvname[$i] == $volumes_id[$fsj]))
+								{
+									$fstype = $volumes_fstype[$fsj];
+									break;
+								}
+							}
+
+							if ($fstype != "iscsi")
+							{
+								$fs = 0;
+								$fsfound = false;
+
+								for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+								{
+									if ($fs_info[$fsi]["type"] == $fstype)
+									{
+										$fs = $fsi;
+										$fsfound = true;
+										break;
+									}
+								}
+
+								if ($fsfound == false)
+									$fs = 0;
+
+								$cluster_resource_str .= " Filesystem::/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i] . "::" . "/mnt/snapshots/" . $snapshots_vgname[$i] . "/" . $snapshots_lvname[$i] . "/" . $snapshots_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["snapshot_mount_options"];
+							}
+						}
+
+						if ($service_winbind > 0)
+							$cluster_resource_str .= " winbind";
+						if ($service_http > 0)
+							$cluster_resource_str .= " httpd";
+						if ($service_nfsv3 > 0)
+							$cluster_resource_str .= " nfs";
+						if ($service_smb > 0)
+							$cluster_resource_str .= " smb";
+                                                if ($service_ftp > 0)
+                                                    $cluster_resource_str .= " proftpd";
+                                                if ($service_rsync > 0)
+                                                    $cluster_resource_str .= " rsync";
+                                                if ($service_iscsi > 0)
+                                                    $cluster_resource_str .= " iscsi-target";
+
+						$cluster_resource_str .= " openfiler";
+
+						fputs($clusterp, $cluster_nodename . $cluster_resource_str . "\n");
+						pclose($clusterp);
+					}
+
+					if ($fstype != "iscsi")
+					{
+						if ($fs_info[$fs]["mount_options"] != " ")
+							$mount_options_string = " -o " . $fs_info[$fs]["mount_options"]; 
+						else
+							$mount_options_string = "";
+						exec("export LANG=C; /usr/bin/sudo /bin/mount -t " . $fs_info[$fs]["type"] . $mount_options_string . " /dev/" . $vgname . "/" . $volumename . " " . escapeshellarg($mountpath));
+						exec("export LANG=C; /usr/bin/sudo /bin/touch " . escapeshellarg($mountpath) . "/aquota.group " . escapeshellarg($mountpath) . "/aquota.user");
+						exec("export LANG=C; /usr/bin/sudo /bin/chown root:root " . escapeshellarg($mountpath) . "/aquota.group " . escapeshellarg($mountpath) . "/aquota.user");
+						exec("export LANG=C; /usr/bin/sudo /bin/chmod 600 " . escapeshellarg($mountpath) . "/aquota.group " . escapeshellarg($mountpath) . "/aquota.user");
+						exec("export LANG=C; /usr/bin/sudo /usr/sbin/quotacheck -ug " . escapeshellarg($mountpath));
+						exec("export LANG=C; /usr/bin/sudo /bin/umount " . escapeshellarg($mountpath));
+
+						exec("export LANG=C; /usr/bin/sudo /bin/mount -t " . $fs_info[$fs]["type"] . $mount_options_string . " /dev/" . $vgname . "/" . $volumename . " " . escapeshellarg($mountpath));
+						exec("export LANG=C; /usr/bin/sudo /usr/sbin/quotaon -ug " . escapeshellarg($mountpath));
+						exec("export LANG=C; /usr/bin/sudo /bin/mkdir " . escapeshellarg($mountpath . "/homes/"));
+						exec("export LANG=C; /usr/bin/sudo /bin/chmod 777 " . escapeshellarg($mountpath . "/homes/"));
+					}
+				}
+			} // end if for checking reiserfs
+		}
+
+		$fstype = "";
+
+		for ($i = 0; $i < count($volumes_id); $i++)
+			if (($volumes_id[$i] == $volumename) && ($volumes_vg[$i] == $vgname))
+			{
+				$fstype = $volumes_fstype[$i];
+				break;
+			}
+
+		if ($fstype != "iscsi")
+		{
+			apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+		}
+
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+	generic_header(array("title" => _("Volumes : Add Volume")));
+	single_begin(array());
+?>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_VOLUME_CREATE");
+?>
+	<h3 align="center">Select Volume Group</h3>
+
+	<?php printMessageBlock("info", "<p>Please select a volume group to create a volume in.</p>"); ?>
+
+	<form action="volumes_create.html" method="get">
+	<p align="center">
+	<select name="vgname">
+<?php
+	for ($i = 0; $i < count($vgds); $i++)
+	{
+		$vginfo = explode(":", trim($vgds[$i], " "));
+
+		if ($vginfo[11] <= 0)
+			break;
+
+		print("\t\t<option" . (($vginfo[0] == $vgname) ? " selected=\"selected\"" : "") . " value=\"" . htmlentities($vginfo[0]) . "\">" . htmlentities($vginfo[0]) . "</option>\n");
+	}
+?>
+	</select>&nbsp;<input type="submit" value="Change" />
+	</p>
+	</form>
+
+	<p>&nbsp;</p>
+
+	<hr />
+
+<?php
+
+        $jsondata_size = array();
+        $jsondata_label = array();
+
+
+
+	for ($i = 0; $i < count($vgds); $i++)
+	{
+		$vginfo = explode(":", trim($vgds[$i], " "));
+
+		if ($vginfo[11] <= 0)
+			continue;
+
+		if ($vginfo[0] != $vgname)
+			continue;
+
+		print("<h3 align=\"center\">Block storage statistics for volume group \"" . htmlentities($vginfo[0]) . "\"</h3>\n");
+		print("<div align=\"center\">\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+		print("<tr>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Total Space</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Used Space</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Free Space</strong></td>\n");
+		print("</tr>\n");
+		print("<tr>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\" valign=\"middle\">" . $vginfo[11] . " bytes (" . ($vginfo[11] / 1024) . " MB)</td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\" valign=\"middle\">" . ($vginfo[14] * ($vginfo[12])) . " bytes (" . (($vginfo[14] * ($vginfo[12])) / (1024)) . " MB)</td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\" valign=\"middle\">" . ($vginfo[15] * ($vginfo[12])) . " bytes (" . (($vginfo[15] * ($vginfo[12])) / (1024)) . " MB)</td>\n");
+		print("</tr>\n");
+		print("</table>\n");
+		print("</div>\n");
+
+		print("<p align=\"center\">&nbsp;</p>\n");
+
+
+                $usedspace = (($vginfo[14] * ($vginfo[12])) / (1024));
+                $freespace = (($vginfo[15] * ($vginfo[12])) / (1024));
+
+
+                array_push($jsondata_size, $usedspace);
+                array_push($jsondata_size, $freespace);
+
+
+                array_push($jsondata_label, "Used");
+                array_push($jsondata_label, "Free");
+
+                print("<div><canvas id=\"graph\" height=\"200\" width=\"200\"></canvas></div>\n"); ?>
+                    <script src="/js/rendervolumegraph.js" type="text/javascript" language="JavaScript"></script>
+                    <script type="text/javascript">
+                        var jsondata_size = <?php print(json_encode($jsondata_size) . ";\n"); ?>
+                        var jsondata_label = <?php print(json_encode($jsondata_label) . ";\n"); ?>
+                        drawGraph(jsondata_size, jsondata_label);
+                    </script>
+                <?php
+
+
+
+
+		print("<h3 align=\"center\">Create a volume in \"" . htmlentities($vginfo[0]) . "\"</h3>\n");
+
+
+
+
+                if(($lvsize_mb + $vginfo[15] * ($vginfo[12] / 1024)) != 0  ) {
+
+
+
+                    print("<form method=\"post\" action=\"volumes_create.html\">\n");
+                    //print("<input type=\"hidden\" name=\"reqspace-$vginfo[0]\" id=\"reqspace-$vginfo[0]\" onchange=\"s.setValue(parseInt(this.value))\"/>\n");
+                    print("<input type=\"hidden\" name=\"h-max-" . htmlentities($vginfo[0]) . "\" id=\"h-max-" . htmlentities($vginfo[0]) . "\" value=\"" . (($vginfo[15] * ($vginfo[12])) / (1024)) . "\" onchange=\"s.setMaximum(parseInt(this.value))\"/>\n ");
+                    print("<input type=\"hidden\" name=\"vgname\" value=\"" . htmlentities($vginfo[0]) . "\" />\n");
+                    print("<div align=\"center\">\n");
+                    print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+                    print("<tr>\n");
+                    print("\t<td align=\"right\" class=\"color_table_heading\">Volume Name (*no spaces*. Valid characters [a-z,A-Z,0-9]):</td>\n");
+                    print("\t<td class=\"color_table_row1\" align=\"center\"><input type=\"text\" name=\"volumename\" /></td>\n");
+                    print("</tr>\n");
+                    print("<tr>\n");
+                    print("\t<td class=\"color_table_heading\" align=\"right\">Volume Description:</td>\n");
+                    print("\t<td class=\"color_table_row2\" align=\"center\"><input type=\"text\" name=\"volumedescription\" /></td>\n");
+                    print("</tr>\n");
+                    print("<tr>\n");
+                    print("\t<td class=\"color_table_heading\" align=\"right\"><table><tr><td>Required Space (MB):</td></tr></table></td>\n");
+                    //print("\t<td><input type=\"text\" name=\"reqspace\" /></td>\n");
+
+
+
+
+                    print("<td class=\"color_table_row1\" align=\"center\"><input type=\"text\" name=\"reqspace\" id=\"reqspace-$vginfo[0]\" onchange=\"s_$vginfo[0].setValue(parseInt(this.value))\"/><div class=\"slider\" id=\"slider-$vginfo[0]\"><input class=\"slider-input\" id=\"slider-input-$vginfo[0]\"/>\n");
+
+
+
+
+
+                    print("</div></td></tr>\n");
+
+
+                    print("<tr>\n");
+                    print("\t<td class=\"color_table_heading\" align=\"right\">Filesystem / Volume type:</td>\n");
+                    print("\t<td class=\"color_table_row2\" align=\"left\">\n");
+                    print("<select name=\"fstype\">\n");
+
+                    for ($j = 0; $j < count($fs_info); $j++)
+                            print("\t<option value=\"" . $fs_info[$j]["type"] . "\">" . $fs_info[$j]["name"] . "</option>\n");
+
+
+                    print("</select>\n");
+                    print("</td>\n");
+                    print("</tr>\n");
+
+
+                    print("<tr>\n");
+                    print("\t<td colspan=\"2\" align=\"center\"><input type=\"submit\" id=\"action_$vginfo[0]\" name=\"action\" value=\"Create\" /></td>\n");
+                    print("</tr>\n");
+                    print("</table>\n");
+                    print("</div>\n");
+
+
+                    print("\t<script type=\"text/javascript\">\n");
+                    print("\t\t var s_$vginfo[0] = new Slider(document.getElementById('slider-$vginfo[0]'), document.getElementById('slider-input-$vginfo[0]'));\n");
+                    print("\t\t s_$vginfo[0].onchange = function () {\n");
+                    print("\t\t\t document.getElementById('reqspace-$vginfo[0]').value = s_$vginfo[0].getValue()\n");
+                    print("\t\t\t s_$vginfo[0].setMaximum(parseInt(document.getElementById('h-max-$vginfo[0]').value))\n");
+                    print("\t\t\t s_$vginfo[0].setMinimum(parseInt(32))\n");
+                    print("\t\t };\n");
+                    print("\t\t s_$vginfo[0].setValue(32);\n");
+                    print("\t\t window.onresize = function () {\n");
+                    print("\t\t\t s_$vginfo[0].recalculate();\n");
+                    print("\t\t };\n");
+                    print("\t </script>\n\n");
+
+
+
+                    print("</form>\n");
+
+                }
+
+                else
+                    printMessageBlock("warning", "No free space in Volume Group.<br/> Please " .
+                                      "increase the size of the volume group by adding new physical " .
+                                      "volumes or delete non-essential logical volumes from the "  .
+                                      htmlentities($vginfo[0]) .  " volume group!");
+
+
+
+
+
+		print("<p align=\"center\">&nbsp;</p>\n");
+	}
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

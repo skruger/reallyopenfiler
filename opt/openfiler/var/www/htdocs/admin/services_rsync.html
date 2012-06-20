@@ -1,0 +1,128 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+        require("pre.inc");
+        include("authenticated.inc");
+        include("rsync.inc");
+        include("network.inc");
+
+        $networks = new Network();
+        $interface = $networks->ListDevices();
+        $ipAddrs = array();
+        $interfaces = array();
+
+        foreach($interface as $key => $value) {
+
+            $nic = new NetworkCard($value);
+            $ip = $nic->GetIP();
+            if ($ip && !$nic->IsSlave()) {
+                array_push($ipAddrs, $ip);
+                array_push($interfaces, $value);
+            }
+        }
+
+        $netdevices = array_combine($interfaces, $ipAddrs);
+
+        $rsync = new Rsync();
+        $port = $rsync->getPort();
+        $ipaddr = $rsync->getIPAddr();
+        $motd = $rsync->getMotd();
+
+
+        if ($_POST['applyrsyncsettings']) {
+
+            global $rsync;
+
+            $newmotd = str_replace("<br/>", "\n", $_POST['newmotd']);
+
+            if ($_POST['newipaddr'] != "All")
+                $rsync->setIPAddr($_POST['newipaddr']);
+            else
+                $rsync->setIPAddr("");
+
+            $rsync->setMotd($newmotd);
+            $rsync->setPort($_POST['newport']);
+
+            header("Location: ./services_rsync.html");
+            exit;
+        }
+
+
+
+	generic_header(array("title" => _("Services : rsync Setup")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_SERVICES_RSYNC");
+	print("<h3 align=\"center\">Rsync settings</h3>\n");
+
+	print("<div align=\"center\">\n");
+	print("<form action=\"services_rsync.html\" method=\"post\">\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>Port number:</strong></td>\n");
+	print("\t<td class=\"color_table_row1\"><input type=\"text\" name=\"newport\" value=\"" . htmlentities($port) . "\" /></td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>IP address:</strong></td>\n");
+	print("\t<td class=\"color_table_row2\"><select name=\"newipaddr\">");
+        print("<option value=\"All\">All</option>");
+
+        foreach($netdevices as $interface=>$ipaddress) {
+
+            print("<option value=\"$ipaddress\"" .  (($ipaddr == $ipaddress) ? " selected=\"selected\"" : "") . ">$interface &lt;==&gt; $ipaddress</option>");
+
+        }
+        print("</select>");
+        print("</td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+
+	print("\t<td align=\"right\" valign=\"top\" class=\"color_table_heading\"><strong>Message of the day (MOTD):</strong></td>\n");
+	print("\t<td class=\"color_table_row1\"><textarea rows=\"10\" cols=\"40\" name=\"newmotd\">" . htmlentities($motd) . "</textarea></td>\n");
+	print("</tr>\n");
+
+        print("<tr>\n");
+        print("<td align=\"right\"><input type=\"submit\" name=\"applyrsyncsettings\" value=\"Apply\"/></td>\n");
+        print("<td align=\"left\"><input type=\"submit\" name=\"cancel\" value=\"Cancel\"/></td>\n");
+        print("</tr>\n");
+	print("</table>\n");
+	print("</form>\n");
+	print("</div>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

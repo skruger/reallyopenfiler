@@ -1,0 +1,6 @@
+<?xml version="1.0" ?>
+<specialpaths>
+	<directory filename="cdrom" />
+	<directory filename="floppy" />
+	<directory filename="cluster_metadata" />
+</specialpaths>

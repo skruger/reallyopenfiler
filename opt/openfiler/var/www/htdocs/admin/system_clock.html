@@ -1,0 +1,285 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    include("authenticated.inc");
+
+	$ntp_server = "";
+
+	function ntp_startelement($parser, $name, $attrs)
+	{
+		global $ntp_server;
+
+		if ($name == "NTP")
+			$ntp_server = $attrs["SERVER"];
+	}
+
+	function ntp_endelement($parser, $name)
+	{
+	}
+
+	if (is_file("/opt/openfiler/etc/ntp.xml"))
+	{
+		$ntp_parser = xml_parser_create();
+		xml_set_element_handler($ntp_parser, "ntp_startelement", "ntp_endelement");
+		$ntp_fp = fopen("/opt/openfiler/etc/ntp.xml", "r");
+
+		while ($ntp_data = fread($ntp_fp, 4096))
+			xml_parse($ntp_parser, $ntp_data, feof($ntp_fp));
+
+		fclose($ntp_fp);
+		xml_parser_free($ntp_parser);
+	}
+
+	if ($action == "newdatetime")
+	{
+		exec("export LANG=C; /usr/bin/sudo /bin/date -s \"" . sprintf("%04d", $year) . "-" . sprintf("%02d", $month) . "-" . sprintf("%02d", $day) . " " . sprintf("%02d", $hour) . ":" . sprintf("%02d", $minute) . "\"");
+		exec("export LANG=C; /usr/bin/sudo /usr/sbin/hwclock -w");
+
+		header("Location: ./system_clock.html");
+		exit;
+	}
+	else if ($action == "newdatetimentp")
+	{
+		$fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/ntp.xml", "w");
+
+		fputs($fp, "<?xml version=\"1.0\" ?>\n");
+		fputs($fp, "<ntp>\n");
+		fputs($fp, "\t<ntp server=\"" . htmlentities($ntpserver) . "\" />\n");
+		fputs($fp, "</ntp>\n");
+		fputs($fp, "\n");
+
+		pclose($fp);
+
+		$fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/ntp.conf", "w");
+
+		fputs($fp, "\nrestrict default nomodify notrap noquery\n");
+		fputs($fp, "restrict 127.0.0.1\n\n");
+		fputs($fp, "server 127.127.1.0\n");
+		fputs($fp, "fudge 127.127.1.0 stratum 10\n\n");
+		fputs($fp, "driftfile /var/lib/ntp/drift\n");
+		fputs($fp, "broadcastdelay  0.008\n");
+		fputs($fp, "keys /etc/ntp/keys\n");
+		fputs($fp, "server " . $ntpserver . "\n");
+		fputs($fp, "restrict " . $ntpserver . " mask 255.255.255.255 nomodify notrap noquery\n\n");
+
+		pclose($fp);
+
+		$fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/ntp/ntpservers", "w");
+
+		fputs($fp, $ntpserver . "\n");
+
+		pclose($fp);
+
+		$fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/ntp/step-tickers", "w");
+
+		fputs($fp, $ntpserver . "\n");
+		fputs($fp, "127.127.1.0\n");
+
+		pclose($fp);
+
+		if (strlen($ntpserver) > 0)
+		{
+			exec("export LANG=C; /usr/bin/sudo /sbin/service ntpd restart");
+			exec("export LANG=C; /usr/bin/sudo /sbin/chkconfig ntpd on");
+		}
+		else
+		{
+			exec("export LANG=C; /usr/bin/sudo /sbin/service ntpd stop");
+			exec("export LANG=C; /usr/bin/sudo /sbin/chkconfig ntpd off");
+		}
+
+		header("Location: ./system_clock.html");
+		exit;
+	}
+	else if ($action == "newtimezone")
+	{
+		if ($useutc == "on")
+			$str = " --utc";
+		else
+			$str = " --noutc";
+
+		exec("export LANG=C; /usr/bin/sudo /usr/sbin/timeconfig" . $str . " \"" . $timezone . "\"");
+		header("Location: ./system_clock.html");
+		exit;
+	}
+
+	generic_header(array("title" => _("System : Clock Setup")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_GENERAL_CLOCK");
+	print("<h3 align=\"center\">Set system clock manually</h3>\n");
+
+	print("<div align=\"center\">\n");
+	print("<form action=\"system_clock.html\" method=\"post\">\n");
+	print("<input type=\"hidden\" name=\"action\" value=\"newdatetime\" />\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\" align=\"right\"><strong>Date:</strong></td>\n");
+	print("\t<td class=\"color_table_row1\">\n");
+	print("\t<select name=\"day\">\n");
+	for ($i = 1; $i <= 31; $i++)
+		print("<option value=\"" . $i . "\"" . (($i == intval(date("d"))) ? " selected=\"selected\"" : "") . ">" . $i . "</option>\n");
+	print("\t</select>\n");
+	print("\t<select name=\"month\">\n");
+	for ($i = 1; $i <= 12; $i++)
+		print("<option value=\"" . $i . "\"" . (($i == intval(date("m"))) ? " selected=\"selected\"" : "") . ">" . $i . "</option>\n");
+	print("\t</select>\n");
+	print("\t<select name=\"year\">\n");
+	for ($i = 2002; $i <= 2030; $i++)
+		print("<option value=\"" . $i . "\"" . (($i == intval(date("Y"))) ? " selected=\"selected\"" : "") . ">" . $i . "</option>\n");
+	print("\t</select>\n");
+	print("\t</td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\" align=\"right\"><strong>Time:</strong></td>\n");
+	print("\t<td class=\"color_table_row2\">\n");
+	print("\t<select name=\"hour\">\n");
+	for ($i = 0; $i < 24; $i++)
+		print("<option value=\"" . $i . "\"" . (($i == intval(date("H"))) ? " selected=\"selected\"" : "") . ">" . sprintf("%02d", $i) . "</option>\n");
+	print("\t</select>\n");
+	print("\t<strong>:</strong>\n");
+	print("\t<select name=\"minute\">\n");
+	for ($i = 0; $i < 60; $i++)
+		print("<option value=\"" . $i . "\"" . (($i == intval(date("i"))) ? " selected=\"selected\"" : "") . ">" . sprintf("%02d", $i) . "</option>\n");
+	print("\t</select>\n");
+	print("\t</td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td colspan=\"2\" align=\"center\"><input type=\"submit\" name=\"actionnewdatetime\" value=\"Set date/time\" /></td>\n");
+	print("</tr>\n");
+	print("</table>\n");
+	print("</form>\n");
+	print("</div>\n");
+
+	print("<p align=\"center\">&nbsp;</p>\n");
+
+	print("<h3 align=\"center\">Keep system clock synchronized with NTP timeserver</h3>\n");
+
+	printMessageBlock("info","<p align=\"center\">Please clear the server field to disable this function. Examples of servers you can use are: <tt>time.nist.gov</tt>, <tt>0.pool.ntp.org</tt>,<br /><tt>1.pool.ntp.org</tt>, <tt>2.pool.ntp.org</tt></p>\n");
+
+	print("<div align=\"center\">\n");
+	print("<form action=\"system_clock.html\" method=\"post\">\n");
+	print("<input type=\"hidden\" name=\"action\" value=\"newdatetimentp\" />\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>Server:</strong></td>\n");
+	print("\t<td class=\"color_table_row1\" align=\"center\">\n");
+	print("\t<input type=\"text\" name=\"ntpserver\" value=\"" . $ntp_server . "\" />\n");
+	print("\t</td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td colspan=\"2\" align=\"center\"><input type=\"submit\" name=\"actionnewdatetimentp\" value=\"Setup synchronization\" /></td>\n");
+	print("</tr>\n");
+	print("</table>\n");
+	print("</form>\n");
+	print("</div>\n");
+
+	$zp = popen("cd /usr/share/zoneinfo; find . -type f -or -type l | grep '^./[A-Z]' | sort", "r");
+
+	if ($zp)
+	{
+		print("<p align=\"center\">&nbsp;</p>\n");
+
+		print("<h3 align=\"center\">Timezone</h3>\n");
+
+		print("<div align=\"center\">\n");
+		print("<form action=\"system_clock.html\" method=\"post\">\n");
+		print("<input type=\"hidden\" name=\"action\" value=\"newtimezone\" />\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+		print("<tr>\n");
+		print("\t<td class=\"color_table_row1\" align=\"center\">\n");
+		print("\t<select name=\"timezone\">\n");
+
+		$useutc = 0;
+
+		$cp = fopen("/etc/sysconfig/clock", "rb");
+
+		if ($cp)
+		{
+			while ($line = fgets($cp))
+			{
+				$line = trim($line);
+
+				if (strncmp($line, "UTC=true", 8) == 0)
+					$useutc = 1;
+				else if (strncmp($line, "ZONE=\"", 6) == 0)
+					$zonefile = substr($line, 6, strlen($line) - 7);
+			}
+
+			fclose($cp);
+		}
+
+		if (!$zonefile)
+		{
+			if (is_link("/etc/localtime"))
+				$zonefile = readlink("/etc/localtime");
+
+			if (!$zonefile)
+				$zonefile = "US/Eastern";
+			else
+			{
+				$zonefile = strstr($zonefile, "zoneinfo/");
+				$zonefile = substr($zonefile, 9, strlen($zonefile) - 9);
+			}
+		}
+
+		while ($line = fgets($zp))
+		{
+			$line = substr($line, 2, strlen($line) - 3);
+			print("\t<option value=\"" . $line . "\"" . (($zonefile == $line) ? " selected=\"selected\"" : "") . ">" . str_replace("_"," ",$line) . "</option>\n");
+		}
+
+		print("\t</select>\n");
+		print("\t</td>\n");
+		print("</tr>\n");
+		print("<tr>\n");
+		print("\t<td class=\"color_table_row2\" colspan=\"2\" align=\"center\"><input type=\"checkbox\" name=\"useutc\"" . (($useutc == 1) ? " checked=\"checked\"" : "") . " /> System clock uses UTC</td>\n");
+		print("</tr>\n");
+		print("<tr>\n");
+		print("\t<td colspan=\"2\" align=\"center\"><input type=\"submit\" name=\"actionnewtimezone\" value=\"Set timezone\" /></td>\n");
+		print("</tr>\n");
+		print("</table>\n");
+		print("</form>\n");
+		print("</div>\n");
+
+		pclose($zp);
+	}
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

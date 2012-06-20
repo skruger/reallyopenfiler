@@ -1,0 +1,243 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+	require_once("network.inc");
+        include("authenticated.inc");
+
+	DEFINE('thispage',"bonding.html");
+
+	if ($cancel) header("Location: ./system.html");
+
+
+	generic_header(array("title" => _("System : Network Setup : Bonding")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_GENERAL");
+
+	print("<h3 align=\"center\">Network Bonding Configuration</h3>\n");
+	printMessageBlock("warning", "It is highly recommended that a bond be configured only if direct terminal access is possible to reconfigure if a problem arises.");
+	$net = new Network();
+	$freeslaves = 0;
+	foreach ($net->ListDevices() as $device){
+		$interface = new NetworkCard($device);
+		if (!$interface->IsSlave() && !$interface->IsMaster()){
+			$freeslaves++;
+		}
+	}
+
+        $bondcounter = 0;
+        $configbonds = $net->ListBonds();
+        if (count($configbonds) > 0) {
+            foreach($configbonds as $bonditem) {
+                $bondcount = explode("bond", $bonditem);
+                if ($bondcounter <= $bondcount[1])
+                    $bondcounter = $bondcount[1];
+                    $bondcounter++;
+            }
+        }
+
+
+	if ($action=="addslave" && $freeslaves < 1){
+		print("<p style=\"width: 55%;\">No available interfaces to add to " . $bond . ".  All interfaces are already assigned to bonds.  To use an interface that is already assigned to a bond, it must first be removed.<br /><br /><a href=\"system.html\">Please return to the previous page.</a></p>\n");
+	}
+	else if($freeslaves < 2 && $action!="addslave"){
+		print("<p style=\"width: 55%;\">To create a bonded interface, you need 2 or more network interfaces that are not currently bonded.  There are not enough interfaces to create a new bond.<br /><br /><a href=\"system.html\">Please return to the previous page.</a></p>\n");
+	}
+	elseif (($step==1) || (empty($step))){
+		print("<form action=\"" . thispage . "\" method=\"post\">\n");
+		print("<table cellspacing=\"2\" cellpadding=\"8\"><tr bgcolor=\"" . ($GLOBALS["color_table_heading"]) . "\"><td align=\"center\" colspan=\"6\"><strong>");
+		if ($action=="addslave")
+			print("Select interfaces to add to bond");
+		else
+			print("Select interfaces to bond");
+
+		print("</strong></td></tr><tr bgcolor=\"" . ($GLOBALS["color_table_heading"]) . "\"><td align=\"center\"><strong>X</strong></td><td><strong>Device</strong></td><td><strong>MAC Address</strong></td><td><strong>Mii Compatible</strong></td><td><strong>Current IP</strong></td></tr>\n");
+		foreach ($net->ListDevices() as $device){
+			$interface = new NetworkCard($device);
+			if ($interface->IsSlave() || $interface->IsMaster()) continue;
+
+			if ($dcolor++ % 2)
+				$dvalue = $GLOBALS["color_table_row2"];
+			else
+				$dvalue = $GLOBALS["color_table_row1"];
+
+			print("<tr bgcolor=\"" . $dvalue . "\">\n");
+			print("<td><input type=\"checkbox\" name=\"" . $interface->GetDevice() . "\" /></td>\n");
+			print("<td>" . $interface->GetDevice() . "</td>\n");
+			print("<td>" . $interface->GetMAC() . "</td>\n");
+			if (!$interface->Mii())
+				print("<td>Yes</td>\n");
+			else
+				print("<td>No</td>\n");
+
+			if ($interface->IsEnabled()){
+				print("<td>" . $interface->GetIP() . "</td>\n");;
+			}
+			else {  //not enabled
+				print("<td>-</td>\n");;
+			}
+		}
+		print("</tr></table><br />\n");
+		print("<input type=\"submit\" name=\"bonding\" value=\"Continue\"/>&nbsp;");
+		print("<input type=\"submit\" name=\"cancel\" value=\"Cancel\"/>\n");
+		if ($action=="addslave"){
+			print("<input type=\"hidden\" name=\"step\" value=\"3\"/>\n");
+			print("<input type=\"hidden\" name=\"action\" value=\"addslave\"/>\n");
+                        print("<input type=\"hidden\" name=\"bondInterface\" value=\"". $bond . "\"/>\n");
+		}
+		else{
+			print("<input type=\"hidden\" name=\"step\" value=\"2\"/>\n");
+		}
+		print("</form>\n");
+
+	}
+	elseif ($step==2){
+		print("<form action=\"" . thispage . "\" method=\"post\">\n");
+		print("<table cellspacing=\"2\" cellpadding=\"8\">");
+
+		print("<tr bgcolor=\"" . ($GLOBALS["color_table_heading"]) . "\"><td align=\"center\" colspan=\"2\"><strong>IP Configuration</strong></td></tr>\n");
+		print("<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" >IP Address:</td><td bgcolor=\"" . $GLOBALS["color_table_row1"] ."\" >");
+		print("<input type=\"text\" name=\"IP\" value=\"" . "\"/></td></tr>");
+		print("<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" >Netmask:</td><td bgcolor=\"" . $GLOBALS["color_table_row2"] ."\" >");
+		print("\t\t<select name=\"netmask\">\n");
+		foreach ($net->GenerateNetmasks() as $mask){
+			print("\t\t\t<option value=\"". $mask . "\">" . $mask . "</option>\n");
+		}
+		print("\t\t</select>\n");
+		print("<tr><td colspan=2>&nbsp;</td></tr>\n");
+		print("<tr bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><td align=\"center\" colspan=\"2\"><strong>Bond Options</strong></td></tr>\n");
+		print("<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" >Bonding Mode: </td><td bgcolor=\"" . $GLOBALS["color_table_row1"] ."\" >");
+		print("<select name=\"mode\">\n");
+		print("\t<option value=\"0\">Balance Round-Robin</option>\n");
+		print("\t<option value=\"1\">Active Backup</option>\n");
+		print("\t<option value=\"2\">Balance - XOR</option>\n");
+		print("\t<option value=\"3\">Broadcast</option>\n");
+		print("\t<option value=\"4\">802.3ad</option>\n");
+		print("\t<option value=\"5\">Balance-tlb</option>\n");
+		print("\t<option value=\"6\">Balance-alb</option>\n");
+		print("</select>\n");
+		print("</td></tr>");
+
+		print("<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" >Primary Interface:</td><td bgcolor=\"" . $GLOBALS["color_table_row2"] ."\" >");
+		print("<select name=\"primary\">");
+		print("<option selected=\"selected\" value=\"false\">No preference (default)</option>");
+
+		foreach ($net->ListDevices() as $device){
+			if ($_POST[$device] == "on")
+				print("<option value=\"" . $device. "\">" . $device . "</option>");
+		}
+
+		print("</select></td></tr>");
+
+		print("<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" >Alternate Link Detection:</td><td bgcolor=\"" . $GLOBALS["color_table_row1"] ."\" >");
+		print("<select name=\"alternate\">");
+		print("<option value=\"1\">False (default)</option>");
+		print("<option value=\"0\">True</option>");
+		print("</select></td></tr>");
+
+		print("<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" >MII link monitoring:</td><td bgcolor=\"" . $GLOBALS["color_table_row2"] ."\" >");
+		print("<select name=\"miimon\">");
+		for($i=50; $i<=500; $i+=50){
+			if ($i == 100)
+				print("<option selected=\"selected\" value=\"" . $i . "\">" . $i . " (default)</option>");
+			else
+				print("<option value=\"" . $i . "\">" . $i . "</option>");
+		}
+		print("</select></td></tr>");
+
+		print("<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" >Down Delay:</td><td bgcolor=\"" . $GLOBALS["color_table_row1"] ."\" >");
+		print("<select name=\"downdelay\">");
+		for($i=0; $i<=500; $i+=50){
+			if ($i == 0)
+				print("<option selected=\"selected\" value=\"" . $i . "\">" . $i . " (default)</option>");
+			else
+				print("<option value=\"" . $i . "\">" . $i . "</option>");
+		}
+		print("</select></td></tr>");
+
+		print("<tr><td bgcolor=\"" . $GLOBALS["color_table_heading"] ."\" >Up Delay:</td><td bgcolor=\"" . $GLOBALS["color_table_row2"] ."\" >");
+		print("<select name=\"updelay\">");
+		for($i=0; $i<=500; $i+=50){
+			if ($i == 0)
+				print("<option selected=\"selected\" value=\"" . $i . "\">" . $i . " (default)</option>");
+			else
+				print("<option value=\"" . $i . "\">" . $i . "</option>");
+		}
+		print("</select></td></tr>");
+
+		print("</table><br />\n");
+		foreach ($net->ListDevices() as $device){
+			if ($_POST[$device] == "on")
+				print("<input type=\"hidden\" name=\"" . $device . "\" value=\"on\">\n");
+		}
+		print("<input type=\"hidden\" name=\"step\" value=\"3\">\n");
+		print("<input type=\"submit\" name=\"bonding\" value=\"Continue\"/>&nbsp;");
+		print("<input type=\"submit\" name=\"cancel\" value=\"Cancel\"/>\n");
+		print("</form>\n");
+
+	}
+	elseif ($step==3){
+
+
+            if ($action=="addslave"){
+                    $bond = new Bond($_POST[bondInterface]); // we're updating an existing interface
+                    foreach ($net->ListDevices() as $device){
+                            if ($_POST[$device] == "on"){
+                                    $bond->AddSlave($device);
+                            }
+                    }
+            }
+        else {
+                global $bondcounter;
+                $bond = new Bond("bond".$bondcounter);  // if we're setting up a new bond interface
+                $mtu = "1500";
+                $bond->Create($mode, $primary, $alternate, $miimon, $downdelay, $updelay);
+                $bond->Save(false, $IP, $netmask, $mtu);
+                foreach ($net->ListDevices() as $device){
+                        if ($_POST[$device] == "on"){
+                                $bond->AddSlave($device);
+                        }
+                }
+                $bond->Start();
+            }
+            header("Location: ./system.html");
+	}
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

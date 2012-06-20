@@ -1,0 +1,176 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+        include("authenticated.inc");
+
+	global $cluster_enabled, $cluster_nodename, $cluster_resource;
+
+	$cluster_enabled = false;
+	$cluster_nodename = "";
+	$cluster_resource = array();
+
+	function cluster_startelement($parser, $name, $attrs)
+	{
+		global $cluster_enabled, $cluster_nodename, $cluster_resource;
+
+		if ($name == "CLUSTERING")
+		{
+			if ($attrs["STATE"] == "on")
+				$cluster_enabled = true;
+			else
+				$cluster_enabled = false;
+		}
+		else if ($name == "NODENAME")
+			$cluster_nodename = $attrs["VALUE"];
+		else if ($name == "RESOURCE")
+			array_push($cluster_resource, $attrs["VALUE"]);
+	}
+
+	function cluster_endelement($parser, $name)
+	{
+	}
+
+	$cluster_parser = xml_parser_create();
+	xml_set_element_handler($cluster_parser, "cluster_startelement", "cluster_endelement");
+	$cluster_fp = fopen("/opt/openfiler/etc/cluster.xml", "r");
+
+	while ($cluster_data = fread($cluster_fp, 4096))
+		xml_parse($cluster_parser, $cluster_data, feof($cluster_fp));
+
+	fclose($cluster_fp);
+	xml_parser_free($cluster_parser);
+
+
+	if ($action == "setclusterresources")
+	{
+		$fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/cluster.xml", "w");
+
+		fputs($fp, "<?xml version=\"1.0\" ?>\n");
+		fputs($fp, "<cluster>\n");
+
+
+		if ($cluster_enabled)
+			fputs($fp, "\t<clustering state=\"on\" />\n");
+		else
+			fputs($fp, "\t<clustering state=\"off\" />\n");
+
+                fputs($fp, "\t<nodename value=\"" . $cluster_nodename . "\"/>\n");
+
+		for ($i = 0; $i < count($cluster_resource); $i++)
+			if (${(sha1($cluster_resource[$i]) . "delete")} != "on")
+				fputs($fp, "\t<resource value=\"" . htmlentities($cluster_resource[$i]) . "\" />\n");
+
+		if (strlen(trim($newresource)) > 0)
+			fputs($fp, "\t<resource value=\"" . htmlentities($newresource) . "\" />\n");
+
+		fputs($fp, "</cluster>\n");
+		fputs($fp, "\n");
+
+		pclose($fp);
+
+		// commented out for now
+		// apply_configuration();
+
+		header("Location: ./system_cluster.html");
+		exit;
+	}
+
+	generic_header(array("title" => _("System : Cluster Setup")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_GENERAL_HA");
+	print("<h3 align=\"center\">HA cluster resources</h3>\n");
+
+	if ($cluster_enabled)
+		print("<p align=\"center\"><strong>Cluster mode is currently enabled.</strong></p>\n");
+	else
+		print("<p align=\"center\"><strong>Cluster mode is currently disabled.</strong></p>\n");
+
+	print("<p align=\"center\"><strong>Node name is </strong> " . ((strlen($cluster_nodename) > 0) ? $cluster_nodename : "<em>currently unset</em>") . "</p>\n");
+
+	print("<form action=\"system_cluster.html\" method=\"post\">\n");
+	print("<input type=\"hidden\" name=\"action\" value=\"setclusterresources\" />\n");
+
+	print("<div align=\"center\">\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+?>
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Delete</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Resource</strong></td>
+	</tr>
+<?php
+
+	$dcolor = 0;
+
+	for ($i = 0; $i < count($cluster_resource); $i++)
+	{
+		if ($dcolor == 0)
+		{
+			$dcolor = 1;
+			$dvalue = $GLOBALS["color_table_row1"];
+		}
+		else
+		{
+			$dcolor = 0;
+			$dvalue = $GLOBALS["color_table_row2"];
+		}
+
+		print("<tr>\n");
+
+		print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"checkbox\" name=\"" . sha1($cluster_resource[$i]) . "delete\" /></td>\n");
+		print("\t<td bgcolor=\"" . $dvalue . "\">" . htmlentities($cluster_resource[$i]) . "</td>\n");
+		print("</tr>\n");
+	}
+
+	$dvalue = $GLOBALS["color_table_heading"];
+
+	print("<tr>\n");
+	print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\">New</td>\n");
+	print("\t<td bgcolor=\"" . $dvalue . "\"><input type=\"text\" name=\"newresource\" size=\"80\" /></td>\n");
+	print("</tr>\n");
+
+	print("</table>\n");
+	print("</div>\n");
+
+	print("<p align=\"center\"><input type=\"submit\" name=\"submit\" value=\"Update\" /></p>\n");
+	print("</form>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

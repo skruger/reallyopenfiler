@@ -1,0 +1,80 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2008 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+	require("pre.inc");
+        require("version.inc");
+	generic_header(array("title" => _("Openfiler Storage Control Center")));
+        include_once("smolt_check.inc.php");
+
+	dual_begin(array());
+        
+        
+
+?>
+
+<div style="margin: 0; padding: 0;">
+
+
+            
+            <div id="loginHeader"><img class="loginHeader" src="/images/open_source_sm.png" alt="open source storage management"/></div>
+            <div id="loginDiv">
+            
+<?php
+            
+
+
+
+            exec('pidof shutdown', $shutdownoutput);
+            if($shutdownoutput[0] != ""){
+                print("<p align=\"center\">&nbsp;</p>\n");
+                print("<h2 align=\"center\">" . _("Shutting down the system...") . "</h2>\n");
+                print("<p align=\"center\">Please stand by.</p>\n");
+            }
+
+           // dual_middle(array());
+		    
+            show_account_details(array());
+            
+            
+			
+
+?>
+            <div><p style="font-size: 90%; color: #aaa; line-height: 14px;"><strong>Distro Release:&nbsp;</strong><?php print getOpenfilerVersion("distro");?><br/>
+                    <strong>GUI Version:&nbsp;</strong><?php print $of_info_version;?></p></div>
+
+</div>
+
+<?php
+       
+
+	dual_end(array());
+	generic_footer(array());
+?>
+

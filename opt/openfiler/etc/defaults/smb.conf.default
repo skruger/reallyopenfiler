@@ -1,0 +1,23 @@
+#
+# PLEASE DO NOT MODIFY THIS CONFIGURATION FILE!
+#   This configuration file was auto-generated
+#   by Openfiler. Please do not modify it.
+#
+
+# Global settings
+
+workgroup = SOMEGROUP
+guest account = nobody
+log file = /var/log/samba/%m.log
+max log size = 0
+security = domain
+hosts deny = all
+encrypt passwords = yes
+smb passwd file = /etc/samba/smbpasswd
+unix password sync = yes
+passwd program = /usr/bin/passwd %u
+passwd chat = *New*password* %n\n *Retype*new*password* %n\n *passwd:*all*authentication*tokens*updated*successfully*
+pam password change = yes
+obey pam restrictions = yes
+load printers = no
+

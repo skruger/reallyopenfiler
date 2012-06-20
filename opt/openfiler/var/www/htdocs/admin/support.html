@@ -1,0 +1,76 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+require("pre.inc");
+
+
+switch ($_GET["page"]) {
+
+    case "support_report":
+        $page = $GLOBALS["support_report"];
+        break;
+    case "support_register":
+        $page = $GLOBALS["support_register"];
+        break;
+    case "support_get":
+        $page = $GLOBALS["support_get"];
+        break;
+    case "support_knowledgebase":
+        $page = $GLOBALS["support_knowledgebase"];
+        break;
+    case "support_forums":
+        $page = $GLOBALS["support_forums"];
+        break;
+    case "support_admin_guide":
+        $page = $GLOBALS["support_admin_guide"];
+        break;
+    default:
+        break;
+
+}
+
+?>
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+    <title><?php global $page; print($page['title']); ?></title>
+</head>
+
+
+<body style="margin: 0; padding: 0; background: white; font-family: Verdana, "bitstream vera sans", sans-serif;">
+    <div style="background: #ebebeb; padding: 10px; border-bottom: 5px solid black;" float: left;><h3>Openfiler Support Resource</h3></div>
+    <iframe src="<?php print $page['url']; ?>" border="0" frameborder="0" height="680" width="100%" scrolling="auto" target="_self">
+</iframe>
+</body>
+</html>

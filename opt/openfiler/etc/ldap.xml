@@ -1,0 +1,6 @@
+<?xml version="1.0" ?>
+<ldap>
+	<user-password value="" />
+	<local-server value="" />
+	<samba-login value="" />
+</ldap>

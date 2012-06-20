@@ -1,0 +1,188 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+	include("authenticated.inc");
+	include("network.inc");
+
+	define(CONFIG_XML_FTP, "/opt/openfiler/etc/ftp_settings.xml");
+	define(CONFIG_XML_FTP_DEFAULTS, "/opt/openfiler/etc/defaults/ftp_settings.xml.default"); 
+
+	global $ftpDom;
+	global $defftpDom; 
+
+	$settings = array();
+	$attrNames = array();
+	$defsettings = array();
+	$defattrNames = array();
+
+	$selectItems = array("UseReverseDNS", "IdentLookups", "TimesGMT", "ServerIdent", "AllowForeignAddress");
+	
+	if ($defftpDom = new XmlHandler(CONFIG_XML_FTP_DEFAULTS)) {
+		if ($ftpSettings = $defftpDom->getElementsByTagName("key")) {
+			foreach($ftpSettings as $ftpSetting) {
+				$name = $ftpSetting->getAttribute("name");
+				$value = $ftpSetting->getAttribute("value");
+				$title = $ftpSetting->getAttribute("title");
+				$settingArray = array("name"=>$name, "value"=>$value, "title"=>$title);
+				array_push($defsettings, $settingArray);
+				array_push($defattrNames, $name);
+			}
+		}
+	}
+
+	if ($ftpDom = new XmlHandler(CONFIG_XML_FTP)) {
+		if ($ftpSettings = $ftpDom->getElementsByTagName("key")) {
+			foreach($ftpSettings as $ftpSetting) {
+				$name = $ftpSetting->getAttribute("name");
+				$value = $ftpSetting->getAttribute("value");
+				$title = $ftpSetting->getAttribute("title");
+				$settingArray = array("name"=>$name, "value"=>$value, "title"=>$title);
+				array_push($settings, $settingArray);
+				array_push($attrNames, $name);
+			}
+		}
+	}
+        
+	// check whether there are any new options in the default configuration
+	
+	$indefault = array_diff_key($defsettings, $settings);
+	foreach ($indefault as $key=>$value) {
+		array_push($settings, $value);
+		array_push($attrNames, $value["name"]);
+	        $name = $value["name"];
+		$attrVal = $value["value"];
+		$title = $value["title"];
+		$xPath = "//proftpd";
+		if ($node = $ftpDom->runXpathQuery($xPath)->item(0)) {
+			
+			if ($newkeyNode = $ftpDom->createElement("key")) {
+				$newkeyNode->setAttribute("name", $name);
+				$newkeyNode->setAttribute("value", $attrVal);
+				$newkeyNode->setAttribute("title", $title);
+				$node->appendChild($newkeyNode);
+			}
+		}
+	}
+	
+
+
+	
+	if (strcmp($_POST['applyftpsettings'], "Apply") == 0) {
+
+		foreach ($_POST as $key => $value) {
+			if (in_array($key, $attrNames)) {
+				$xPath = "//key[@name='$key']";
+				if ($node = $ftpDom->runXpathQuery($xPath)->item(0)) {
+					$node->setAttribute("value", $value);
+				}
+			}
+		}
+		
+
+		$ftpDom->saveDom();
+		
+		
+
+		if ($_POST['reload'] == "on") {
+
+			apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+		}
+
+		header("Location: ./services_ftp.html");
+		exit;
+	}
+
+
+
+	generic_header(array("title" => _("Services : FTP Setup")));
+	single_begin(array());
+
+?>
+
+<p> &nbsp;</p>
+<?php
+
+    nested_tab_begin("C_SERVICES_FTP");
+	print("<h3 align=\"center\">FTP settings</h3>\n");
+
+	print("<div align=\"center\">\n");
+	print("<form action=\"services_ftp.html\" method=\"post\">\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+
+
+	$dcolor = 1;
+
+	foreach($settings as $key => $array) {
+
+		print("\t<tr>\n");
+		print("\t<td align=\"right\" class=\"color_table_heading\"><strong>" . $array['title'] . "</strong></td>\n");
+
+		if (!in_array($array['name'], $selectItems)) {
+
+			print("\t<td align=\"left\" class=\"color_table_row" . $dcolor . "\"><input name=\"" . $array['name'] . "\" type=\"text\" value=\"" . $array['value'] . "\"/></td>\n");
+
+		}
+
+		else {
+
+			print("\t<td align=\"left\" class=\"color_table_row" . $dcolor . "\"><select name=\"" . $array['name'] . "\">\n");
+			print("\t\t<option value=\"off\"" .  (($array['value'] == "off") ? " selected=\"selected\"" : "") . ">&nbsp;off&nbsp;</option>\n");
+			print("\t\t<option value=\"on\"" .  (($array['value'] == "on") ? " selected=\"selected\"" : "") . ">&nbsp;on&nbsp;</option>\n");
+			print("\t</select></td>");
+		}
+
+		print("\t</tr>\n");
+
+
+
+		if ($dcolor == 1)
+			$dcolor = 2;
+		else
+			$dcolor = 1;
+
+	}
+
+	print("\t<tr><td align=\"right\" class=\"color_table_heading\"><input name=\"reload\" type=\"checkbox\"/></td><td class=\"color_table_row" . $dcolor . "\"><strong>Reload services</strong></td></tr>\n");
+
+	print("<tr>\n");
+	print("<td align=\"right\"><input type=\"submit\" name=\"applyftpsettings\" value=\"Apply\"/></td>\n");
+	print("<td align=\"left\"><input type=\"submit\" name=\"cancel\" value=\"Cancel\"/></td>\n");
+	print("</tr>\n");
+	print("</table>\n");
+	print("</form>\n");
+	print("</div>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

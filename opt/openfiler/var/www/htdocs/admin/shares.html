@@ -1,0 +1,741 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    include("shares.inc");
+    include("authenticated.inc");
+
+
+    global $volumes_id;
+    global $volumes_name;
+    global $volumes_mountpoint;
+    global $volumes_vg;
+    global $volumes_fstype;
+
+
+    $volumes_id = array();
+    $volumes_name = array();
+    $volumes_mountpoint = array();
+    $volumes_vg = array();
+    $volumes_fstype = array();
+
+    /* check whether a homes path has been defined */
+
+    global $homespath;
+    global $homespathdefined;
+    global $homespathDom;
+    global $homespathNode;
+
+    $homespathdefined = FALSE;
+
+    define('CONFIG_XML_HOMESPATH', "/opt/openfiler/etc/homespath.xml");
+
+    if ($homespathDom = new XmlHandler(CONFIG_XML_HOMESPATH)) {
+        if ($homespathNode = $homespathDom->getElementsByTagName("homespath")->item(0)) {
+                $homespath = $homespathNode->getAttribute("value");
+                if (strlen($homespath) > 0) {
+                    $homespathdefined = TRUE;
+                }
+        }
+    }
+
+
+    function volumes_startelement($parser, $name, $attrs)
+    {
+            global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg, $volumes_fstype;
+
+            if ($name == "VOLUME")
+            {
+                    array_push($volumes_id, $attrs["ID"]);
+                    array_push($volumes_name, $attrs["NAME"]);
+                    array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+                    array_push($volumes_vg, $attrs["VG"]);
+                    array_push($volumes_fstype, $attrs["FSTYPE"]);
+            }
+    }
+
+    function volumes_endelement($parser, $name)
+    {
+    }
+
+    $volumes_parser = xml_parser_create();
+    xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+    $volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+    while ($volumes_data = fread($volumes_fp, 4096))
+        xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+    fclose($volumes_fp);
+    xml_parser_free($volumes_parser);
+
+
+    if ($action == "createfolder")
+    {
+            if (is_valid_foldername($newfolderid))
+                    if ((!is_dir($sourcepath . $newfolderid)) && (strcasecmp($newfolderid, "global") != 0) && (strcasecmp($newfolderid, "homes") != 0) && (strcasecmp($newfolderid, "printers") != 0))
+                    {
+                            exec("export LANG=C; /usr/bin/sudo /bin/mkdir " . escapeshellarg($sourcepath . $newfolderid));
+
+                            $fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee " . escapeshellarg($sourcepath . $newfolderid . ".info.xml"), "w");
+
+                            fputs($fp, "<?xml version=\"1.0\" ?>\n");
+                            fputs($fp, "<info>\n");
+                            fputs($fp, "\t<key name=\"dirtype\" value=\"leaf\" />\n");
+                            fputs($fp, "\t<key name=\"description\" value=\"" . htmlentities($newfolderid) . "\" />\n");
+                            fputs($fp, "\t<key name=\"dircount\" value=\"0\" />\n");
+                            fputs($fp, "</info>\n");
+                            fputs($fp, "\n");
+
+                            pclose($fp);
+
+                            if ((strlen($prevpath) > 0) && (strlen($prevfolder) > 0) && is_file($prevpath . $prevfolder . ".info.xml"))
+                            {
+                                    $fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee " . escapeshellarg($prevpath . $prevfolder . ".info.xml"), "w");
+                                    fputs($fp, "<?xml version=\"1.0\" ?>\n");
+                                    fputs($fp, "<info>\n");
+                                    fputs($fp, "\t<key name=\"dirtype\" value=\"closed\" />\n");
+                                    fputs($fp, "\t<key name=\"description\" value=\"" . htmlentities($prevdescription) . "\" />\n");
+                                    fputs($fp, "\t<key name=\"dircount\" value=\"" . ($dircount + 1) . "\" />\n");
+                                    fputs($fp, "</info>\n");
+                                    fputs($fp, "\n");
+                                    pclose($fp);
+                            }
+                    }
+
+            header("Location: ./shares.html");
+            exit;
+    }
+    else if ($action == "deletefolder")
+    {
+            if (is_valid_foldername($folderid))
+                    if (is_dir($sourcepath . $folderid . "/"))
+                    {
+                            exec("export LANG=C; /usr/bin/sudo /bin/rm -rf " . escapeshellarg($sourcepath . $folderid . "/"));
+                            exec("export LANG=C; /usr/bin/sudo /bin/rm -f " . escapeshellarg($sourcepath . $folderid . ".info.xml"));
+
+                            $parent_dir = "";
+
+                            for ($i = (strlen($sourcepath) - 2); $i >= 0; $i--)
+                                    if ($sourcepath[$i] == '/')
+                                    {
+                                            $parent_dir = substr($sourcepath, 0, $i);
+                                            $child_dir = substr($sourcepath, $i + 1, (strlen($sourcepath) - $i - 2));
+                                            break;
+                                    }
+
+                            if ((strlen($parent_dir) > 0) && (strlen($child_dir) > 0))
+                            {
+                                    $parent_dir_type = "";
+                                    $parent_dir_description = "";
+                                    $parent_dir_count = 0;
+
+                                    function parent_dir_startelement($parser, $name, $attrs)
+                                    {
+                                            global $parent_dir_type, $parent_dir_description, $parent_dir_count;
+
+                                            if ($name == "KEY")
+                                            {
+                                                    if ($attrs["NAME"] == "dirtype")
+                                                            $parent_dir_type = $attrs["VALUE"];
+                                                    else if ($attrs["NAME"] == "description")
+                                                            $parent_dir_description = $attrs["VALUE"];
+                                                    else if ($attrs["NAME"] == "dircount")
+                                                            $parent_dir_count = $attrs["VALUE"];
+                                            }
+                                    }
+
+                                    function parent_dir_endelement($parser, $name)
+                                    {
+                                    }
+
+                                    if (is_file($parent_dir . "/" . $child_dir . ".info.xml"))
+                                    {
+                                            $parent_dir_parser = xml_parser_create();
+                                            xml_set_element_handler($parent_dir_parser, "parent_dir_startelement", "parent_dir_endelement");
+                                            $parent_dir_fp = fopen($parent_dir . "/" . $child_dir . ".info.xml", "r");
+
+                                            while ($parent_dir_data = fread($parent_dir_fp, 4096))
+                                                    xml_parse($parent_dir_parser, $parent_dir_data, feof($parent_dir_fp));
+
+                                            fclose($parent_dir_fp);
+                                            xml_parser_free($parent_dir_parser);
+
+                                            $parent_dir_count--;
+                                            if ($parent_dir_count < 0)
+                                                    $parent_dir_count = 0;
+                                            if ($parent_dir_count == 0)
+                                                    $parent_dir_type = "leaf";
+
+                                            $fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee " . escapeshellarg($parent_dir . "/" . $child_dir . ".info.xml"), "w");
+                                            fputs($fp, "<?xml version=\"1.0\" ?>\n");
+                                            fputs($fp, "<info>\n");
+                                            fputs($fp, "\t<key name=\"dirtype\" value=\"" . $parent_dir_type . "\" />\n");
+                                            fputs($fp, "\t<key name=\"description\" value=\"" . htmlentities($parent_dir_description) . "\" />\n");
+                                            fputs($fp, "\t<key name=\"dircount\" value=\"" . $parent_dir_count . "\" />\n");
+                                            fputs($fp, "</info>\n");
+                                            fputs($fp, "\n");
+                                            pclose($fp);
+                                    }
+                            }
+
+                            if (($sourcepath . $folderid . "/") == $homespath) {
+                                    $homespathNode->setAttribute("value", "");
+                                    $homespathDom->saveDom();
+                            }
+
+                            if ($regenerateconfig == "yes")
+                                    apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+                    }
+
+            header("Location: ./shares.html");
+            exit;
+    }
+    else if ($action == "renamefolder")
+    {
+            if (is_valid_foldername($foldername))
+                    if (is_dir($folderpath . $foldername) && is_file($folderpath . $foldername . ".info.xml")
+                            && (!strstr($newfoldername, '/')) && (!(is_dir($folderpath . $newfoldername))))
+            {
+                    exec("export LANG=C; /usr/bin/sudo /bin/mv -f " . escapeshellarg($folderpath . $foldername) . " " . escapeshellarg($folderpath . $newfoldername));
+                    exec("export LANG=C; /usr/bin/sudo /bin/rm -f " . escapeshellarg($folderpath . $foldername . ".info.xml"));
+
+                    $fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee " . escapeshellarg($folderpath . $newfoldername . ".info.xml"), "w");
+                    fputs($fp, "<?xml version=\"1.0\" ?>\n");
+                    fputs($fp, "<info>\n");
+                    fputs($fp, "\t<key name=\"dircount\" value=\"" . $dircount . "\" />\n");
+                    fputs($fp, "\t<key name=\"dirtype\" value=\"" . $dirtype . "\" />\n");
+                    fputs($fp, "\t<key name=\"description\" value=\"" . htmlentities($folderdescription) . "\" />\n");
+                    fputs($fp, "</info>\n");
+                    fputs($fp, "\n");
+                    pclose($fp);
+            }
+
+            header("Location: ./shares.html");
+            exit;
+    }
+    else if ($action == "renamedescription")
+    {
+            if (is_valid_foldername($foldername))
+                    if (is_dir($folderpath . $foldername) && is_file($folderpath . $foldername . ".info.xml"))
+                    {
+                            $fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee " . escapeshellarg($folderpath . $foldername . ".info.xml"), "w");
+
+                            fputs($fp, "<?xml version=\"1.0\" ?>\n");
+                            fputs($fp, "<info>\n");
+                            fputs($fp, "\t<key name=\"dircount\" value=\"" . $dircount . "\" />\n");
+                            fputs($fp, "\t<key name=\"dirtype\" value=\"" . $dirtype . "\" />\n");
+                            fputs($fp, "\t<key name=\"description\" value=\"" . htmlentities($newfolderdescription) . "\" />\n");
+                            fputs($fp, "</info>\n");
+                            fputs($fp, "\n");
+
+                            pclose($fp);
+                    }
+
+            header("Location: ./shares.html");
+            exit;
+    }
+
+    else if ($action == "makeshare")
+    {
+            if (is_valid_foldername($foldername) && ($dirtype == "leaf"))
+                    if (is_dir($folderpath . $foldername) && is_file($folderpath . $foldername . ".info.xml"))
+                    {
+                            $fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee " . escapeshellarg($folderpath . $foldername . ".info.xml"), "w");
+
+                            fputs($fp, "<?xml version=\"1.0\" ?>\n");
+                            fputs($fp, "<info>\n");
+                            fputs($fp, "\t<key name=\"dircount\" value=\"" . $dircount . "\" />\n");
+                            fputs($fp, "\t<key name=\"dirtype\" value=\"share\" />\n");
+                            fputs($fp, "\t<key name=\"description\" value=\"" . htmlentities($folderdescription) . "\" />\n");
+                            fputs($fp, "</info>\n");
+                            fputs($fp, "\n");
+
+                            pclose($fp);
+                    }
+
+            header("Location: ./shares_edit.html?sharepath=" . urlencode($folderpath . $foldername . "/"));
+            exit;
+    }
+
+    else if ($action == "makehomesshare")
+    {
+            if (is_valid_foldername($foldername) && ($dirtype == "leaf"))
+                    if (is_dir($folderpath . $foldername) && is_file($folderpath . $foldername . ".info.xml"))
+                    {
+
+                            $homespathNode->setAttribute("value", $folderpath . $foldername . "/");
+                            $homespathDom->saveDom();
+
+                            /* set modes */
+
+                            exec("export LANG=C; /usr/bin/sudo /bin/chmod go+w " . escapeshellarg($folderpath . $foldername));
+
+                            $fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee " . escapeshellarg($folderpath . $foldername . ".info.xml"), "w");
+
+                            fputs($fp, "<?xml version=\"1.0\" ?>\n");
+                            fputs($fp, "<info>\n");
+                            fputs($fp, "\t<key name=\"dircount\" value=\"" . $dircount . "\" />\n");
+                            fputs($fp, "\t<key name=\"dirtype\" value=\"share\" />\n");
+                            fputs($fp, "\t<key name=\"description\" value=\"" . htmlentities($folderdescription) . "\" />\n");
+                            fputs($fp, "\t<smb sharename=\"homes\"/>");
+                            fputs($fp, "\t<rsync module=\"homes\"/>");
+                            fputs($fp, "</info>\n");
+                            fputs($fp, "\n");
+                            pclose($fp);
+                    }
+
+            header("Location: ./shares_edit.html?sharepath=" . urlencode($folderpath . $foldername . "/"));
+            exit;
+    }
+
+
+    // get share objects metadata
+
+    $shares = new Shares();
+    $numVolumes = $shares->volumesPathCount;
+
+    generic_header(array("title" => _("Shares Section")));
+    single_begin(array());
+
+    $curcolor = $GLOBALS["color_table_row2"];
+    $imgid = $GLOBALS["color_table_row2_colstr"];
+
+    function getcolor()
+    {
+            global $curcolor, $imgid;
+
+            if ($curcolor == $GLOBALS["color_table_row1"])
+            {
+                    $curcolor = $GLOBALS["color_table_row2"];
+                    $imgid = $GLOBALS["color_table_row2_colstr"];
+            }
+            else
+            {
+                    $curcolor = $GLOBALS["color_table_row1"];
+                    $imgid = $GLOBALS["color_table_row1_colstr"];
+            }
+
+            return $curcolor;
+    }
+
+
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_SHARES");
+?>
+	<div align="center">
+	<table cellpadding="0" cellspacing="0" border="0" width="70%">
+	<tr>
+	<td>
+        <?php
+        if ($numVolumes == 0) {
+
+            printMessageBlock("warning","No filesystem volumes configured. Please <a href=\"/admin/volumes_create.html\">create a new filesystem volume</a>.");
+
+        }
+        ?>
+	<div style="border-left: 1px solid rgb(128, 128, 128); border-right: 1px solid rgb(128, 128, 128); border-bottom: 1px solid rgb(128, 128, 128); border-top: 1px solid rgb(128, 128, 128); background-color: <?php print($GLOBALS["color_table_heading"]); ?>; color: <?php print($GLOBALS["color_table_heading_text"]); ?>;">
+
+
+
+        	<table cellpadding="8" cellspacing="0" border="0">
+		<tr>
+			<td align="left" valign="middle"><strong>Network Shares</strong></td>
+		</tr>
+		</table>
+	</div>
+<?php
+
+	global $unique_descriptions, $unique_description_counts;
+
+	$unique_descriptions = array();
+	$unique_description_counts = array();
+
+	$dir_type = "";
+	$dir_description = "";
+	$dir_count = 0;
+	$share_smb_sharename = "";
+
+	global $paddinglevel;
+
+	$paddinglevel = 0;
+
+	function dir_startelement($parser, $name, $attrs)
+	{
+		global $dir_type, $dir_description, $dir_count, $share_smb_sharename;
+
+		if ($name == "KEY")
+		{
+			if ($attrs["NAME"] == "dirtype")
+				$dir_type = $attrs["VALUE"];
+			else if ($attrs["NAME"] == "description")
+				$dir_description = $attrs["VALUE"];
+			else if ($attrs["NAME"] == "dircount")
+				$dir_count = $attrs["VALUE"];
+		}
+		else if ($name == "SMB")
+		{
+			$share_smb_sharename = $attrs["SHARENAME"];
+		}
+	}
+
+	function dir_endelement($parser, $name)
+	{
+	}
+
+	function process_dir($mountpoint)
+	{
+		global $paddinglevel, $dir_description, $dir_type, $dir_count, $share_smb_sharename, $imgid;
+
+		$paddinglevel++;
+		$handle = opendir($mountpoint);
+
+		while ($file = readdir($handle))
+		{
+			if (($file == ".") || ($file == "..") || (!is_dir($mountpoint . $file)))
+				continue;
+
+			if (!is_file($mountpoint . $file . ".info.xml"))
+				continue;
+
+			$dir_parser = xml_parser_create();
+			xml_set_element_handler($dir_parser, "dir_startelement", "dir_endelement");
+			$dir_fp = fopen($mountpoint . $file . ".info.xml", "r");
+
+			while ($dir_data = fread($dir_fp, 4096))
+				xml_parse($dir_parser, $dir_data, feof($dir_fp));
+
+			fclose($dir_fp);
+			xml_parser_free($dir_parser);
+
+			$rand_id = sha1($file . rand());
+
+?>
+			<div style="border-left: 1px solid rgb(128, 128, 128); border-right: 1px solid rgb(128, 128, 128); border-bottom: 1px solid rgb(128, 128, 128); padding-left: <?php print(32 * $paddinglevel); ?>px; background-color: <?php print(getcolor()); ?>; color: rgb(40, 40, 40);">
+				<table cellpadding="4" cellspacing="0" border="0">
+				<tr>
+					<td align="center" valign="middle">
+					<div id="popup-<?php print($rand_id); ?>" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+					<table cellpadding="10" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td>
+<?php
+							if ($dir_type != "share")
+							{
+?>
+							<form action="shares.html" method="post">
+							<input type="hidden" name="action" value="createfolder" />
+							<input type="hidden" name="prevpath" value="<?php print(htmlentities($mountpoint)); ?>" />
+							<input type="hidden" name="prevdescription" value="<?php print(htmlentities($dir_description)); ?>" />
+							<input type="hidden" name="prevfolder" value="<?php print(htmlentities($file)); ?>" />
+							<input type="hidden" name="dircount" value="<?php print($dir_count); ?>" />
+							<input type="hidden" name="sourcepath" value="<?php print(htmlentities($mountpoint . $file . "/")); ?>" />
+							<table cellpadding="4" cellspacing="0" border="0">
+							<tr>
+								<td><strong>Folder name:</strong></td>
+								<td>&nbsp;</td>
+							</tr>
+							<tr>
+								<td><input type="text" name="newfolderid" /></td>
+								<td><input type="submit" name="newfoldersubmit" value="Create Sub-folder" /></td>
+							</tr>
+							</table>
+							</form>
+
+							<form action="shares.html" method="post">
+							<input type="hidden" name="action" value="renamefolder" />
+							<input type="hidden" name="folderpath" value="<?php print(htmlentities($mountpoint)); ?>" />
+							<input type="hidden" name="dircount" value="<?php print($dir_count); ?>" />
+							<input type="hidden" name="dirtype" value="<?php print($dir_type); ?>" />
+							<input type="hidden" name="folderpath" value="<?php print(htmlentities($mountpoint)); ?>" />
+							<input type="hidden" name="foldername" value="<?php print(htmlentities($file)); ?>" />
+							<input type="hidden" name="folderdescription" value="<?php print(htmlentities($dir_description)); ?>" />
+							<table cellpadding="4" cellspacing="0" border="0">
+							<tr>
+								<td><strong>New folder name:</strong></td>
+								<td>&nbsp;</td>
+							</tr>
+							<tr>
+								<td><input type="text" name="newfoldername" value="<?php print(htmlentities($file)); ?>" /></td>
+								<td><input type="submit" name="newfoldernamesubmit" value="Rename Folder" /></td>
+							</tr>
+							</table>
+							</form>
+
+							<form action="shares.html" method="post">
+							<input type="hidden" name="action" value="renamedescription" />
+							<input type="hidden" name="dircount" value="<?php print($dir_count); ?>" />
+							<input type="hidden" name="dirtype" value="<?php print($dir_type); ?>" />
+							<input type="hidden" name="folderpath" value="<?php print(htmlentities($mountpoint)); ?>" />
+							<input type="hidden" name="foldername" value="<?php print(htmlentities($file)); ?>" />
+							<table cellpadding="4" cellspacing="0" border="0">
+							<tr>
+								<td><strong>New description:</strong></td>
+								<td>&nbsp;</td>
+							</tr>
+							<tr>
+								<td><input type="text" name="newfolderdescription" value="<?php print(htmlentities($dir_description)); ?>" /></td>
+								<td><input type="submit" name="newfoldernamesubmit" value="Rename Description" /></td>
+							</tr>
+							</table>
+							</form>
+<?php
+							}
+
+							if ($dir_type == "leaf")
+							{
+?>
+							<table cellpadding="4" cellspacing="0" border="0">
+							<tr>
+								<td>
+									<form action="shares.html" method="post">
+									<input type="hidden" name="action" value="makeshare" />
+									<input type="hidden" name="dircount" value="<?php print($dir_count); ?>" />
+									<input type="hidden" name="dirtype" value="<?php print($dir_type); ?>" />
+									<input type="hidden" name="folderpath" value="<?php print(htmlentities($mountpoint)); ?>" />
+									<input type="hidden" name="foldername" value="<?php print(htmlentities($file)); ?>" />
+									<input type="hidden" name="folderdescription" value="<?php print(htmlentities($dir_description)); ?>" />
+									<input type="submit" name="sharesubmit" value="Make Share" />
+									</form>
+								</td>
+<?php
+								global $homespathdefined;
+								if (!$homespathdefined) {
+?>
+								<td>
+									<form action="shares.html" method="post">
+									<input type="hidden" name="action" value="makehomesshare" />
+									<input type="hidden" name="dircount" value="<?php print($dir_count); ?>" />
+									<input type="hidden" name="dirtype" value="<?php print($dir_type); ?>" />
+									<input type="hidden" name="folderpath" value="<?php print(htmlentities($mountpoint)); ?>" />
+									<input type="hidden" name="foldername" value="<?php print(htmlentities($file)); ?>" />
+									<input type="hidden" name="folderdescription" value="<?php print(htmlentities($dir_description)); ?>" />
+									<input type="submit" name="sharesubmit" value="Make Homes Share" />
+									</form>
+								</td>
+<?php
+								}
+?>
+								<td>
+									<form action="shares.html" method="post">
+									<input type="hidden" name="action" value="deletefolder" />
+									<input type="hidden" name="sourcepath" value="<?php print(htmlentities($mountpoint)); ?>" />
+									<input type="hidden" name="folderid" value="<?php print(htmlentities($file)); ?>" />
+									<input type="hidden" name="regenerateconfig" value="no" />
+									<input type="submit" name="deletesubmit" value="Delete Folder" />
+									</form>
+								</td>
+							</tr>
+							</table>
+<?php
+							}
+?>
+						</td>
+					</tr>
+					<tr>
+						<td align="center"><a href="#" onclick="hideCurrentPopup(); return false;">Close Window</a></td>
+					</tr>
+					</table>
+					</div>
+					<a href="#">
+					<?php
+						if ($dir_type == "share")
+							print("\t<img src=\"/images/icons/folder-share-" . $imgid . ".png\" width=\"22\" height=\"22\" alt=\"\" />\n");
+						else if ($dir_type == "leaf")
+							print("\t<img src=\"/images/icons/folder-leaf-" . $imgid . ".png\" width=\"24\" height=\"24\" alt=\"\" />\n");
+						else if ($dir_type == "closed")
+							print("\t<img src=\"/images/icons/folder-closed-" . $imgid . ".png\" width=\"24\" height=\"24\" alt=\"\" />\n");
+					?>
+					</a></td>
+
+<?php
+				if ($dir_type == "share")
+				{
+					$dir_description_suffix = "";
+
+					if (strlen($share_smb_sharename) > 0)
+					{
+						global $unique_descriptions, $unique_description_counts;
+
+						$tr_found = false;
+						for ($tr_i = 0; $tr_i < count($unique_descriptions); $tr_i++)
+							if ($unique_descriptions[$tr_i] == $share_smb_sharename)
+							{
+								$tr_found = true;
+								$unique_description_index = $tr_i;
+								break;
+							}
+
+						if ($tr_found)
+						{
+							$unique_description_counts[$unique_description_index]++;
+							$dir_description_suffix = "<span style=\"color: red; background-color: transparent;\"> [<em>DUPLICATE SMB: " . $share_smb_sharename . " <strong>" . $unique_description_counts[$unique_description_index] . "</strong></em>]</span>";
+						}
+						else
+						{
+							array_push($unique_descriptions, $share_smb_sharename);
+							array_push($unique_description_counts, 1);
+							$dir_description_suffix = " <span style=\"background-color: #c6d5a8; font-weight: bold;\">[<em>SMB: " . $share_smb_sharename . "</em>]</span>";
+						}
+					}
+?>
+					<td align="left" valign="middle"><a href="shares_edit.html?sharepath=<?php print(urlencode($mountpoint . $file . "/")); ?>"><?php print(htmlentities($dir_description)); ?></a><?php print($dir_description_suffix); ?><?php print((1) ? (" (<tt>" . htmlentities($mountpoint . $file . "/") . "</tt>)") : ""); ?></td>
+<?php
+				}
+				else
+				{
+?>
+					<td align="left" valign="middle"><a href="#" onclick="return !showPopup('popup-<?php print($rand_id); ?>', event);"><?php print(htmlentities($dir_description)); ?></a><?php print((1) ? (" (<tt>" . htmlentities($mountpoint . $file . "/") . "</tt>)") : ""); ?></td>
+<?php
+				}
+?>
+				</tr>
+				</table>
+			</div>
+<?php
+			if ($dir_type == "closed")
+				process_dir($mountpoint . $file . "/");
+		}
+
+		closedir($handle);
+		$paddinglevel--;
+	}
+
+	function process_volume($volume_index)
+	{
+		global $imgid;
+		global $volumes_id;
+		global $volumes_name;
+		global $volumes_mountpoint;
+		global $volumes_vg;
+		global $volumes_fstype;
+		global $paddinglevel;
+
+		$paddinglevel++;
+?>
+	<div style="border-left: 1px solid rgb(128, 128, 128); border-right: 1px solid rgb(128, 128, 128); border-bottom: 1px solid rgb(128, 128, 128); padding-left: <?php print(32 * $paddinglevel); ?>px; background-color: <?php print(getcolor()); ?>; color: rgb(64, 64, 64);">
+		<table cellpadding="4" cellspacing="0" border="0">
+		<tr>
+			<td align="center" valign="middle">
+			<div id="popupvolume-<?php print($volumes_vg[$volume_index] . "-" . $volumes_id[$volume_index]); ?>" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+			<table cellpadding="10" cellspacing="0" border="0" width="100%">
+			<tr>
+				<td>
+				<form action="shares.html" method="post">
+				<input type="hidden" name="action" value="createfolder" />
+				<input type="hidden" name="sourcepath" value="<?php print(htmlentities($volumes_mountpoint[$volume_index])); ?>" />
+					<table cellpadding="8" cellspacing="0" border="0">
+					<tr>
+						<td><strong>Folder name:</strong></td>
+						<td>&nbsp;</td>
+					</tr>
+					<tr>
+						<td><input type="text" name="newfolderid" /></td>
+						<td><input type="submit" name="newfoldersubmit" value="Create Sub-folder" /></td>
+					</tr>
+					</table>
+				</form>
+				</td>
+			</tr>
+			<tr>
+				<td align="center"><a href="#" onclick="hideCurrentPopup(); return false;">Close Window</a></td>
+			</tr>
+			</table>
+			</div>
+			<a href="#" onclick="return !showPopup('popupvolume-<?php print($volumes_vg[$volume_index] . "-" . $volumes_id[$volume_index]); ?>', event);"><img src="/images/icons/volume-<?php print($imgid); ?>.png" width="22" height="22" alt="" /></a>
+			</td>
+			<td align="left" valign="middle"><a href="#" onclick="return !showPopup('popupvolume-<?php print($volumes_vg[$volume_index] . "-" . $volumes_id[$volume_index]); ?>', event);"><strong><?php print($volumes_name[$volume_index]); ?></strong></a><?php print((1) ? (" (<tt>" . $volumes_mountpoint[$volume_index] . "</tt>)") : ""); ?></td>
+		</tr>
+		</table>
+	</div>
+<?php
+		process_dir($volumes_mountpoint[$volume_index]);
+		$paddinglevel--;
+	}
+
+	$vgp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "vgdisplay -c", "r");
+	$i = 0;
+	while (!feof($vgp))
+		$vgds[$i++] = fgets($vgp, 4096);
+	pclose($vgp);
+
+	if (count($vgds) <= 0)
+		print("<p align=\"center\">There are no existing volume groups.<br />Please create some volume groups.</p>");
+	else for ($i = 0; $i < count($vgds); $i++)
+	{
+		$vginfo = explode(":", trim($vgds[$i], " "));
+
+		if ($vginfo[11] <= 0)
+			break;
+
+?>
+	<div style="border-left: 1px solid rgb(128, 128, 128); border-right: 1px solid rgb(128, 128, 128); border-bottom: 1px solid rgb(128, 128, 128); padding-left: <?php print(32 * $paddinglevel); ?>px; background-color: <?php print(getcolor()); ?>; color: rgb(64, 64, 64);">
+		<table cellpadding="4" cellspacing="0" border="0">
+		<tr>
+			<td align="center" valign="middle">
+				<img src="/images/icons/vg-<?php print($imgid); ?>.png" width="30" height="23" alt="" />
+			</td>
+			<td align="left" valign="middle">
+				<strong><?php print($vginfo[0]); ?></strong><?php print((1) ? (" (<tt>/mnt/" . $vginfo[0] . "/</tt>)") : ""); ?>
+			</td>
+		</tr>
+		</table>
+	</div>
+<?php
+		for ($j = 0; $j < count($volumes_id); $j++)
+		{
+			if (($volumes_vg[$j] == $vginfo[0]) && ($volumes_fstype[$j] != "iscsi"))
+				process_volume($j);
+		}
+	}
+
+?>
+
+	</td>
+	</tr>
+	</table>
+	</div>
+<?php
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

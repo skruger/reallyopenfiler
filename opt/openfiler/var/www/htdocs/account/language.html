@@ -1,0 +1,75 @@
+<?php
+
+/*
+ * Natural language selection
+ *
+ * Copyright (C) 2006 Voluna Software. All rights reserved.
+ *
+ */
+
+	require("pre.inc");
+
+	if ($GLOBALS["userauthenticated"] == 0)
+	{
+		generic_header(array("title" => _("Your account")));
+		dual_begin(array());
+		print("<h2><a href=\"/\">" . _("Home") . "</a> / " . _("Your account") . "</h2>\n");
+		print("<p>" . _("You have not authenticated yourself to the system yet with your") . " <em>" . _("username") . "</em> " . _("and") . " <em>" . _("password") . "</em>. " .
+			_("You will not be able to use this section of the website without authenticating yourself first. So, please continue and login using the form on the right hand side.") . "</p>\n");
+		dual_middle(array());
+		show_account_details(array());
+		dual_end(array());
+		generic_footer(array());
+		exit;
+	}
+
+	if ($_POST["language"])
+	{
+		setcookie("language_code", $_POST["language"], time() + (3600 * 24 * 365), "/");
+		generic_header(array("title" => _("Your account")));
+		dual_begin(array());
+		print("<p>Your display language setting was changed successfully.</p>");
+		dual_middle(array());
+		show_account_details(array());
+		dual_end(array());
+		generic_footer(array());
+		exit;
+	}
+
+	generic_header(array("title" => _("Your account")));
+	single_begin(array());
+	print("<h2><a href=\"/\">" . _("Home") . "</a> / " . _("Your account") . "</h2>\n");
+
+?>
+
+<p>Hi <?php print($usercookie); ?>! The following are your account information and preferences, arranged
+into tabs. Please click on a tab to open up that category.</p>
+
+<?php
+	tab_begin(4, 2, array("Quota", "Password", "Language", "Logout"), array("./", "password.html", "language.html", "logout.html"));
+?>
+	<form action="language.html" method="post">
+	<table cellpadding="10" cellspacing="0" border="0">
+	<tr>
+		<td>Select Language:</td>
+		<td>
+			<select name="language">
+				<option value="en_EN" <?php print(($language_code == "en_EN") ? "selected=\"selected\"" : ""); ?>>English</option>
+				<option value="fr_FR" <?php print(($language_code == "fr_FR") ? "selected=\"selected\"" : ""); ?>>French</option>
+				<option value="de_DE" <?php print(($language_code == "de_DE") ? "selected=\"selected\"" : ""); ?>>German</option>
+				<option value="it_IT" <?php print(($language_code == "it_IT") ? "selected=\"selected\"" : ""); ?>>Italian</option>
+				<option value="es_ES" <?php print(($language_code == "es_ES") ? "selected=\"selected\"" : ""); ?>>Spanish</option>
+			</select>
+		</td>
+	</tr>
+	<tr>
+		<td colspan="2" align="center"><input name="submit" type="submit" value="Submit" /></td>
+	</tr>
+	</table>
+	</form>
+<?php
+	tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

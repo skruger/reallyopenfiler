@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<proftpd>
+	<key name="ServerName" value="FTP Server" title="Server name:"/>
+	<key name="ServerIdent" value="on" title="Server ident:"/>
+	<key name="Port" value="21" title="Port"/>
+	<key name="PassivePorts" value="55535 65534" title="Passive ports:"/>
+	<key name="MaxInstances" value="500" title="Max instances:"/>
+	<key name="TimeoutLogin" value="120" title="Login timeout:"/>
+	<key name="TimeoutIdle" value="600" title="Idle timeout:"/>
+	<key name="TimeoutNoTransfer" value="900" title="No transfer timeout:"/>
+	<key name="TimeoutStalled" value="3600" title="Stall timeout:"/>
+	<key name="TimesGMT" value="off" title="Use GMT times:"/>
+	<key name="UseReverseDNS" value="off" title="Use reverse DNS:"/>
+	<key name="IdentLookups" value="off" title="Perform identity lookups:"/>
+        <key name="AllowForeignAddress" value="on" title="Allow Foreign Address:"/>
+</proftpd>

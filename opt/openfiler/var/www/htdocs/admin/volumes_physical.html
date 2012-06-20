@@ -1,0 +1,259 @@
+<?php
+
+
+    require("pre.inc");
+    require("md.inc");
+    include("authenticated.inc");
+
+    /* rescan scsi bus before doing anything else */
+    $cmd = "export LANG=C; /usr/bin/sudo /usr/sbin/rescan-scsi-bus.sh 2>&1";
+    exec($cmd, $output, $ret);
+
+    $md = get_md();
+
+    $disksp = popen("export LANG=C; /usr/bin/sudo /opt/openfiler/sbin/list-disks.pl", "r");
+    $i = 0;
+    while (!feof($disksp))
+    {
+            $dstr = trim(fgets($disksp, 4096));
+            // $dresult[$i++] = substr($dstr, 0, strlen($dstr) - 1);
+            $dresult[$i++] = $dstr;
+    }
+    pclose($disksp);
+
+    $of_disks = array();
+
+    if ($dresult[0] == "OPENFILER")
+    {
+            $i = 1;
+
+            while ($i < count($dresult))
+            {
+                    if (strncmp($dresult[$i], "DISK", 4) == 0)
+                    {
+                            $p = $i;
+                            $i = $i + 8;
+
+                            $parts = array();
+
+                            while (($dresult[$i] == "PARTITION") && ($i < count($dresult)))
+                            {
+                                    array_push($parts, array("device" => $dresult[$i + 1], "type" => $dresult[$i + 2], "number" => $dresult[$i + 3], "start" => $dresult[$i + 4], "end" => $dresult[$i + 5], "blocks" => $dresult[$i + 6], "extended" => $dresult[$i + 7]));
+                                    $i = $i + 8;
+                            }
+
+                            array_push($of_disks,
+                                    array("label" => substr($dresult[$p], 5, strlen($dresult[$p]) - 5),
+                                            "device" => $dresult[$p + 1],
+                                            "type" => $dresult[$p + 2],
+                                            "description" => $dresult[$p + 3],
+                                            "blocksize" => ($dresult[$p + 4] * 2),
+                                            "cylinders" => $dresult[$p + 5],
+                                            "heads" => $dresult[$p + 6],
+                                            "sectors" => $dresult[$p + 7],
+                                            "partitions" => $parts));
+                    }
+                    else
+                            break;
+            }
+    }
+
+    $in_use = array();
+    $used_in_string = array();
+
+    for ($i = 0; $i < count($of_disks); $i++)
+    {
+            for ($j = 0; $j < count($of_disks[$i]["partitions"]); $j++)
+            {
+                    $ptype = $of_disks[$i]["partitions"][$j]["type"];
+                    $pv_device = $of_disks[$i]["partitions"][$j]["device"];
+
+                    $in_use[$pv_device] = false;
+                    $used_in_string[$pv_device] = "<em>Unknown / unused</em>";
+
+                    if ($ptype == "8e")
+                    {
+                            $pvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "pvdisplay " . $pv_device, "r");
+                            $pvstr = trim(fgets($pvp, 4096));
+                            pclose($pvp);
+
+                            if ((strcmp($pvstr, "--- Physical volume ---") == 0) || (strcmp($pvstr, "--- NEW Physical volume ---") == 0))
+                            {
+                                    $pvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "pvdisplay -c " . $pv_device, "r");
+                                    $pvstr = trim(fgets($pvp, 4096));
+                                    pclose($pvp);
+
+                                    $pvinfo = explode(":", trim($pvstr, " "));
+
+                                    if (($pvinfo[0] == $pv_device) && (strlen($pvinfo[1]) > 0))
+                                    {
+                                            $in_use[$pv_device] = true;
+                                            $used_in_string[$pv_device] = "<tt>" . $pvinfo[1] . "</tt> VG";
+                                    }
+                            }
+                    }
+                    else if ($ptype == "fd")
+                    {
+                            for ($ii = 0; $ii < count($md); $ii++)
+                            {
+                                    for ($k = 0; $k < count($md[$ii]["members"]); $k++)
+                                    {
+                                            if ($md[$ii]["members"][$k]["device"] == $pv_device)
+                                            {
+                                                    $in_use[$pv_device] = true;
+                                                    $used_in_string[$pv_device] = "<tt>" . $md[$ii]["device"] . "</tt>";
+                                                    break;
+                                            }
+                                    }
+
+                                    if ($in_use[$pv_device])
+                                            break;
+                            }
+                    }
+            }
+    }
+
+    generic_header(array("title" => _("Volumes : Block Devices")));
+    single_begin(array());
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_VOLUME_PHYSICAL_MANAGEMENT");
+	print("<h3 align=\"center\">Block Device Management</h3>\n");
+
+	for ($i = 0; $i < count($of_disks); $i++)
+	{
+		$rand_id = sha1($of_disks[$i]["device"]);
+
+		$dcolor = 0;
+
+		print("<div id=\"popup-" . $rand_id . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"partitionspopup\">\n");
+
+		print("<h3 align=\"center\">Partitions in " . $of_disks[$i]["device"] . "</h3>\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+		print("<tr>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Device</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\"><strong>Type</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Number</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Size</strong></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Used In</strong></td>\n");
+		print("</tr>\n");
+
+		for ($j = 0; $j < count($of_disks[$i]["partitions"]); $j++)
+		{
+			if ($dcolor == 0)
+			{
+				$dcolor = 1;
+				$dvalue = $GLOBALS["color_table_row1"];
+			}
+			else
+			{
+				$dcolor = 0;
+				$dvalue = $GLOBALS["color_table_row2"];
+			}
+
+			$ptype = $of_disks[$i]["partitions"][$j]["type"];
+
+			switch ($ptype)
+			{
+				case "83":	$ptype_str = "Linux Filesystem (<tt>0x" . $ptype . "</tt>)"; break;
+				case "82":	$ptype_str = "Linux Swap (<tt>0x" . $ptype . "</tt>)"; break;
+				case "8e":	$ptype_str = "Linux Physical Volume (<tt>0x" . $ptype . "</tt>)"; break;
+				case "fd":	$ptype_str = "Linux RAID Array Member (<tt>0x" . $ptype . "</tt>)"; break;
+
+				case "05":
+				case "5":
+				case "0f":
+				case "f":	$ptype_str = "Extended Partition (<tt>0x" . $ptype . "</tt>)"; break;
+
+				default:	$ptype_str = "Unknown Partition Type (<tt>0x" . $ptype . "</tt>)"; break;
+			}
+
+                        $tmpH = popen('export LANG=C; /usr/bin/sudo /sbin/blockdev --getsize64 2>&1 ' . $of_disks[$i]["partitions"][$j]["device"] , 'r');
+                        $part_size = trim(fread($tmpH, 2096));
+                        pclose($tmpH);
+                        
+        
+                        if ($part_size > (1024 * 1024 * 1024 * 1024))
+                                $part_size_string = sprintf("%.02f TB", ($part_size / (1024 * 1024 * 1024 * 1024.0)));
+                        else if ($part_size > (1024 * 1024 * 1024))
+                                $part_size_string = sprintf("%.02f GB", ($part_size / (1024 * 1024 * 1024.0)));
+                        else if ($part_size > (1024 * 1024))
+                                $part_size_string = sprintf("%.02f MB", ($part_size / (1024 * 1024.0)));
+                        else if ($part_size > (1024))
+                                $part_size_string = sprintf("%.02f KB", ($part_size / (1024.0)));
+                        else
+                                $part_size_string = $part_size . " bytes";
+
+			print("<tr>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $of_disks[$i]["partitions"][$j]["device"] . "</td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\" align=\"left\">" . $ptype_str . "</td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $of_disks[$i]["partitions"][$j]["number"] . "</td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $part_size_string . "</td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . $used_in_string[$of_disks[$i]["partitions"][$j]["device"]] . "</td>\n");
+			print("</tr>\n");
+		}
+
+		print("</table>\n");
+
+		print("<p><a href=\"#\" onclick=\"hideCurrentPopup(); return false;\">Close Window</a></p>\n");
+
+		print("<p align=\"center\">&nbsp;</p>\n");
+
+		print("</div>\n");
+	}
+
+	print("<div align=\"center\">\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	print("<tr>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Edit Disk</strong></td>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Type</strong></td>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Description</strong></td>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\"><strong>Size</strong></td>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Label type</strong></td>\n");
+	print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\"><strong>Partitions</strong></td>\n");
+	print("</tr>\n");
+
+	for ($i = 0; $i < count($of_disks); $i++)
+	{
+		$rand_id = sha1($of_disks[$i]["device"]);
+
+		print("<tr>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading2"] . "\"><a href=\"volumes_editpartitions.html?dev=" . urlencode($of_disks[$i]["device"]) . "\">" . $of_disks[$i]["device"] . "</a></td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading2"] . "\">" . strtoupper($of_disks[$i]["type"]) . "</td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading2"] . "\">" . $of_disks[$i]["description"] . "</td>\n");
+
+		$disk_size = (($of_disks[$i]["blocksize"] / 2) * $of_disks[$i]["cylinders"] * $of_disks[$i]["heads"] * $of_disks[$i]["sectors"]);
+
+		if ($disk_size > (1024 * 1024 * 1024))
+			$disk_size_string = sprintf("%.02f GB", ($disk_size / (1024 * 1024 * 1024.0)));
+		else if ($disk_size > (1024 * 1024))
+			$disk_size_string = sprintf("%.02f MB", ($disk_size / (1024 * 1024.0)));
+		else if ($disk_size > (1024))
+			$disk_size_string = sprintf("%.02f KB", ($disk_size / (1024.0)));
+		else
+			$disk_size_string = $disk_size . " bytes";
+
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading2"] . "\">" . $disk_size_string . "</td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading2"] . "\" align=\"center\">" . $of_disks[$i]["label"] . "</td>\n");
+		print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading2"] . "\" align=\"center\">" . count($of_disks[$i]["partitions"]) . " (<a href=\"#\" onclick=\"return !showPopup('popup-" . $rand_id . "', event);\">view</a>)</td>\n");
+		print("</tr>\n");
+	}
+
+	print("</table>\n");
+	print("</div>\n");
+
+	print("<p align=\"center\">&nbsp;</p>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

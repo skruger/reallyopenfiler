@@ -1,0 +1,406 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    include("authenticated.inc");
+	require_once("authconfig.inc.php"); 
+
+
+	$authobj = new AuthConfig(); 
+	
+	if (($_GET["sort"] == "gid") || ($_POST["sort"] == "gid"))
+		$sortorder = "gid";
+	else if (($_GET["sort"] == "gname") || ($_POST["sort"] == "gname"))
+		$sortorder = "gname";
+	else if (($_GET["sort"] == "gtype") || ($_POST["sort"] == "gtype"))
+		$sortorder = "gtype";
+	else
+		$sortorder = "none";
+
+	$groups_gid = array();
+	$groups_name = array();
+	$groups_members = array();
+	$groups_type = array();
+
+	endgrent();
+
+	while ($group_info = getgrent())
+	{
+		if  (($group_info["gr_gid"] >= $global_min_gid))
+		{
+			array_push($groups_gid, $group_info["gr_gid"]);
+			array_push($groups_name, $group_info["gr_name"]);
+			array_push($groups_members, $group_info["gr_mem"]);
+			array_push($groups_type, "Unknown");
+		}
+	}
+
+	endgrent();
+
+	$list_n = count($groups_gid);
+
+	$list_pages = intval(ceil($list_n / $list_count));
+
+	$list_cur_page = intval($_GET["list_cur_page"]);
+
+	if (($list_cur_page < 0) || ($list_cur_page > ($list_pages - 1)))
+		$list_cur_page = 0;
+
+	if ($list_cur_page == ($list_pages - 1))
+	{
+		$list_next_page = 0;
+		$list_prev_page = $list_cur_page - 1;
+	}
+	else if ($list_cur_page == 0)
+	{
+		$list_next_page = $list_cur_page + 1;
+		$list_prev_page = $list_pages - 1;
+	}
+	else
+	{
+		$list_next_page = $list_cur_page + 1;
+		$list_prev_page = $list_cur_page - 1;
+	}
+
+	if (($list_prev_page < 0) || ($list_prev_page > ($list_pages - 1)))
+		$list_prev_page = 0;
+
+	if (($list_next_page < 0) || ($list_next_page > ($list_pages - 1)))
+		$list_next_page = 0;
+
+	$list_start = $list_cur_page * $list_count;
+	$list_end = ($list_cur_page + 1) * $list_count;
+
+	if ($list_end > $list_n)
+		$list_end = $list_n;
+
+
+	
+
+	if (strncasecmp($authobj->globalSettings['nss_nis'], "enabled", 7) == 0)
+	{
+		// add NIS groups
+
+		$groupp = popen("/usr/bin/sudo /usr/bin/ypcat group", "r");
+
+		$i = 0;
+		while (!feof($groupp))
+		{
+			$gresult[$i] = explode(":", fgets($groupp, 4096));
+
+			foreach (($gresult[$i]) as $gresultitem)
+				$gresultitem = trim($gresultitem);
+
+			if ((strlen($gresult[$i][0]) > 0) && ($gresult[$i][2] >= $global_min_gid))
+			{
+				for ($j = 0; $j < count($groups_gid); $j++)
+					if (($groups_gid[$j] == $gresult[$i][2]) && ($groups_name[$j] == $gresult[$i][0]) && ($groups_type[$j] == "Unknown"))
+						$groups_type[$j] = "NIS";
+			}
+
+			$i++;
+		}
+
+		pclose($groupp);
+	}
+
+    if (strncasecmp($authobj->globalSettings['nss_ldap'], "enabled", 7) == 0)
+	{
+		// add LDAP groups
+		$groupGID = array();
+		foreach (getLDAPgroup() as $ldapgroup)
+			$groupGID[$ldapgroup[gid]] = $ldapgroup[name];
+
+		for ($j = 0; $j < count($groups_gid); $j++)
+			if ($groupGID[$groups_gid[$j]] == $groups_name[$j])
+				$groups_type[$j] = "LDAP";
+	}
+
+	if (strncasecmp($authobj->globalSettings['nss_hesiod'], "enabled", 7) == 0)
+	{
+		// add Hesiod groups
+	}
+
+	// add local groups
+
+	$groupp = popen("/usr/bin/sudo /bin/cat /etc/group", "r");
+	$i = 0;
+	while (!feof($groupp))
+	{
+		$gresult[$i] = explode(":", fgets($groupp, 4096));
+		foreach (($gresult[$i]) as $gresultitem)
+			$gresultitem = trim($gresultitem);
+
+		if ((strlen($gresult[$i][0]) > 0) && ($gresult[$i][2] >= $global_min_gid))
+		{
+			for ($j = 0; $j < count($groups_gid); $j++)
+				if (($groups_gid[$j] == $gresult[$i][2]) && ($groups_name[$j] == $gresult[$i][0]) && ($groups_type[$j] == "Unknown"))
+					$groups_type[$j] = "Local";
+		}
+
+		$i++;
+	}
+
+	pclose($groupp);
+
+	$users_uid = array();
+	$users_name = array();
+	$users_gid = array();
+	$users_gname = array();
+	$users_type = array();
+
+	foreach (get_users() as $user_info)
+	{
+		if  (($user_info["pw_uid"] >= $global_min_uid))
+		{
+			array_push($users_uid, $user_info["pw_uid"]);
+			array_push($users_name, $user_info["pw_name"]);
+			$ugid = $user_info["pw_gid"];
+			array_push($users_gid, $ugid);
+
+			$found = 0;
+			for ($i = 0; $i < count($groups_gid); $i++)
+				if ($groups_gid[$i] == $ugid)
+				{
+					array_push($users_gname, $groups_name[$i]);
+					$found = 1;
+					break;
+				}
+
+			if ($found == 0)
+				array_push($users_gname, "N/A");
+
+			array_push($users_type, "Unknown");
+		}
+	}
+
+	if (strncasecmp($authobj->globalSettings['nss_nis'], "enabled", 7) == 0)
+	{
+		// add NIS users
+
+		$userp = popen("/usr/bin/sudo /usr/bin/ypcat passwd", "r");
+
+		$i = 0;
+		while (!feof($userp))
+		{
+			$uresult[$i] = explode(":", fgets($userp, 4096));
+
+			foreach (($uresult[$i]) as $uresultitem)
+				$uresultitem = trim($uresultitem);
+
+			if ((strlen($uresult[$i][0]) > 0) && ($uresult[$i][2] >= $global_min_uid))
+			{
+				for ($j = 0; $j < count($users_uid); $j++)
+					if (($users_uid[$j] == $uresult[$i][2]) && ($users_name[$j] == $uresult[$i][0]) && ($users_type[$j] == "Unknown"))
+						$users_type[$j] = "NIS";
+			}
+
+			$i++;
+		}
+
+		pclose($userp);
+
+	}
+
+    if (strncasecmp($authobj->globalSettings['nss_ldap'], "enabled", 7) == 0)
+	{
+		// add LDAP users
+		// Disable until optimised
+
+		$userUID = array();
+		foreach (getLDAPuser() as $ldapuser)
+			$userUID[$ldapuser[uid]] = $ldapuser[name];
+		for ($j = 0; $j < count($users_uid); $j++)
+			if ($userUID[$users_uid[$j]] == $users_name[$j])
+				$users_type[$j] = "LDAP";
+	}
+
+	if (strncasecmp($authobj->globalSettings['nss_hesiod'], "enabled", 7) == 0)
+	{
+		// add Hesiod users
+	}
+
+	// add local users
+
+	$userp = popen("/usr/bin/sudo /bin/cat /etc/passwd", "r");
+	$i = 0;
+	while (!feof($userp))
+	{
+		$uresult[$i] = explode(":", fgets($userp, 4096));
+		foreach (($uresult[$i]) as $uresultitem)
+			$uresultitem = trim($uresultitem);
+
+		if ((strlen($uresult[$i][0]) > 0) && ($uresult[$i][2] >= $global_min_uid))
+		{
+			for ($j = 0; $j < count($users_uid); $j++)
+				if (($users_uid[$j] == $uresult[$i][2]) && ($users_name[$j] == $uresult[$i][0]) && ($users_type[$j] == "Unknown"))
+					$users_type[$j] = "Local";
+		}
+
+		$i++;
+	}
+
+	pclose($userp);
+
+	generic_header(array("title" => _("Accounts : Groups")));
+	single_begin(array());
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_ACCOUNTS_GROUPS");
+
+	if ($sortorder == "gname")
+		array_multisort($groups_name, $groups_gid, $groups_type, $groups_members);
+	else if ($sortorder == "gid")
+		array_multisort($groups_gid, $groups_name, $groups_type, $groups_members);
+	else if ($sortorder == "gtype")
+		array_multisort($groups_type, $groups_gid, $groups_name, $groups_members);
+
+?>
+
+	<h3 align="center">List of groups</h3>
+	<p align="center">The following is a list of groups available to the system.</p>
+
+
+	<div align="center">
+	<table width="600" cellpadding="8" cellspacing="2" border="0">
+	<tr>
+		<td align="left" width="33%" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><a style="display: block;" href="account_groups.html?sort=<?php print($sortorder); ?>&amp;list_cur_page=<?php print($list_prev_page); ?>"><strong>&#x00ab; Previous page</strong></a></td>
+		<td align="center" width="33%" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><strong><?php print("Page " . ($list_cur_page + 1) . " of " . $list_pages) ?></strong></td>
+		<td align="right" width="33%" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><a style="display: block;" href="account_groups.html?sort=<?php print($sortorder); ?>&amp;list_cur_page=<?php print($list_next_page); ?>"><strong>Next page &#x00bb;</strong></a></td>
+	</tr>
+	</table>
+	</div>
+
+	<table cellpadding="8" cellspacing="2" border="0">
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><a class="tableheading" href="?sort=gid" title="Sort groups by GID">GID</a></strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><a class="tableheading" href="?sort=gname" title="Sort groups by Name">Group Name</a></strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong><a class="tableheading" href="?sort=gtype" title="Sort groups by Group Type">Group Type</a></strong></td>
+	</tr>
+<?php
+	$dcolor = 0;
+
+	for ($i = $list_start; $i < $list_end; $i++)
+	{
+		if ($dcolor == 0)
+		{
+			$dcolor = 1;
+			$dvalue = $GLOBALS["color_table_row1"];
+		}
+		else
+		{
+			$dcolor = 0;
+			$dvalue = $GLOBALS["color_table_row2"];
+
+		}
+
+		$rand_id = $groups_gid[$i];
+
+		print("<tr>\n");
+
+		print("\t<td valign=\"top\" bgcolor=\"" . $dvalue . "\">" . $groups_gid[$i] . "</td>\n");
+		print("\t<td valign=\"top\" bgcolor=\"" . $dvalue . "\">");
+
+?>
+		<div id="popup-<?php print($rand_id); ?>" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="groupspopup">
+		<table cellpadding="10" cellspacing="0" border="0" width="100%">
+		<tr>
+			<td>
+			<p align="center"><strong>Members of the group <em><?php print($groups_name[$i]); ?></em></strong></p>
+			<div align="center">
+			<table cellpadding="8" cellspacing="2" border="0" width="100%">
+			<tr>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>UID</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>User Name</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>User Type</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Primary Group</strong></td>
+			</tr>
+<?php
+			$ucolor = 0;
+			for ($l = 0; $l < count($users_name); $l++)
+				if (in_array($users_name[$l], $groups_members[$i]))
+				{
+					if ($ucolor == 0)
+					{
+						$ucolor = 1;
+						$uvalue = $GLOBALS["color_table_row1"];
+					}
+					else
+					{
+						$ucolor = 0;
+						$uvalue = $GLOBALS["color_table_row2"];
+					}
+
+					print("<tr>\n");
+					print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $users_uid[$l] . "</td>\n");
+					print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $users_name[$l] . "</td>\n");
+					print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $users_type[$l] . "</td>\n");
+					print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $users_gname[$l] . "</td>\n");
+					print("</tr>\n");
+				}
+?>
+			</table>
+			</div>
+			</td>
+		</tr>
+		<tr>
+			<td align="center"><a href="#" onclick="hideCurrentPopup(); return false;">Close Window</a></td>
+		</tr>
+		</table>
+		</div>
+<?php
+		print("<a href=\"#\" onclick=\"return !showPopup('popup-" . $rand_id . "', event);\">");
+		print($groups_name[$i]);
+		print("</a>");
+
+		print("</td>\n");
+		print("\t<td valign=\"top\" bgcolor=\"" . $dvalue . "\" align=\"center\">" . $groups_type[$i] . "</td>\n");
+		print("</tr>\n");
+	}
+?>
+	</table>
+
+<?php
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

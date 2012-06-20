@@ -1,0 +1,1535 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+
+    require("pre.inc");
+    require("authenticated.inc");
+    require("network.inc");
+	require_once("authconfig.inc.php"); 
+
+    if (($_GET["sort"] == "gid") || ($_POST["sort"] == "gid"))
+            $sortorder = "gid";
+    else if (($_GET["sort"] == "gname") || ($_POST["sort"] == "gname"))
+            $sortorder = "gname";
+    else if (($_GET["sort"] == "gtype") || ($_POST["sort"] == "gtype"))
+            $sortorder = "gtype";
+    else
+            $sortorder = "none";
+
+    $share_type = "";
+    $share_description = "";
+    $share_count = 0;
+    $share_accesspublic = 0;
+    $share_smb_oplocks = 1;
+    $share_smb_dos_filemode = 0;
+    $share_smb_dos_filetime_resolution = 0;
+    $share_smb_dos_filetimes = 0;
+    $share_smb_fake_directory_create_times = 0;
+    $share_smb_force_security_mode = "0";
+    $share_smb_csc_policy = "manual";
+    $share_smb_browseable = 1;
+    $share_smb_sharename = "";
+
+    $share_rsync_max_connections = "0";
+    $share_rsync_use_chroot = "yes";
+    $share_rsync_write_only = "no";
+    $share_rsync_read_only = "yes";
+    $share_rsync_list = "no";
+    $share_rsync_comment = "";
+    $share_rsync_fake_super = "no"; 
+
+
+    $groups_access = array();
+    $groups_primary = 0;
+
+    $networks_count = 0;
+    $networks_network = array();
+    $networks_netmask = array();
+    $networks_access = array();
+    $networks_type = array();
+    $networks_nfs = array(); //store nfs share attributes
+
+    global $homespath;
+    global $homespathdefined;
+
+    $homespathdefined = false;
+
+    define('CONFIG_XML_HOMESPATH', "/opt/openfiler/etc/homespath.xml");
+
+
+
+
+    $networkListObj = new NetworkAccessList();
+
+    $networkAccessList = $networkListObj->ListItems();
+
+    /* remove ups networks */
+
+    foreach ($networkAccessList as $key => $networkAccessArray) {
+
+        $keyItem = array_search("ups", $networkAccessArray);
+        if ($keyItem)
+            unset($networkAccessList[$key]);
+
+    }
+
+    /* fill networks arrays */
+
+    foreach ($networkAccessList as $key => $networkAccessArray) {
+
+        $networks_name[$networks_count] = $networkAccessArray['name'];
+        $networks_network[$networks_count] = $networkAccessArray['network'];
+        $networks_netmask[$networks_count] = $networkAccessArray['netmask'];
+        $networks_access[$networks_count] = "n          ";
+        $networks_count++;
+
+    }
+
+
+    $share_parent = "";
+    $share_name = "";
+
+    for ($i = (strlen($sharepath) - 2); $i >= 0; $i--)
+        if ($sharepath[$i] == '/') {
+
+            $share_parent = substr($sharepath,0, $i);
+            $share_name = substr($sharepath, $i + 1, (strlen($sharepath) - $i - 2));
+            break;
+
+        }
+
+    /* check whether a homes path has been defined */
+
+    if ($homespathDom = new XmlHandler(CONFIG_XML_HOMESPATH)) {
+        if ($homespathNode = $homespathDom->getElementsByTagName("homespath")->item(0)) {
+
+            $homespath = $homespathNode->getAttribute("value");
+
+            if (strlen($homespath) > 0) {
+                if (($share_parent . "/" . $share_name . "/") == $homespath)
+                    $homespathdefined = true;
+            }
+        }
+    }
+
+
+
+    $SHARE_INFO_FILE = $share_parent . "/" . $share_name . ".info.xml";
+    $shareDoc = new XmlHandler($SHARE_INFO_FILE);
+
+    $xPathDircount = "//key[@name='dircount']";
+    $xPathDirtype = "//key[@name='dirtype']";
+    $xPathDescription = "//key[@name='description']";
+
+    $share_type = $shareDoc->runXpathQuery($xPathDirtype)->item(0)->getAttribute("value");
+    $share_description = $shareDoc->runXpathQuery($xPathDescription)->item(0)->getAttribute("value");
+    $share_count = $shareDoc->runXpathQuery($xPathDircount)->item(0)->getAttribute("value");
+
+
+    if ($domGroups = $shareDoc->getElementsByTagName("group")) {
+        foreach ($domGroups as $domGroup) {
+
+            $gid = $domGroup->getAttribute("id");
+            $str = "";
+
+            $readAttribute = $domGroup->getAttribute("read");
+            $writeAttribute = $domGroup->getAttribute("write");
+            $accessAttribute = $domGroup->getAttribute("access");
+
+            if ($readAttribute == "yes")
+                $str .= "r";
+            else
+                $str .= " ";
+
+            if ($writeAttribute == "yes")
+                $str .= "w";
+            else
+                $str .= " ";
+
+            if ($accessAttribute == "yes")
+                $str .= "a";
+            else
+                $str .= " ";
+
+            $groups_access[$gid] = $str;
+
+        }
+    }
+
+    if ($groupsPrimaryElement = $shareDoc->getElementsByTagName("primary")->item(0) )
+        $groups_primary = $groupsPrimaryElement->getAttribute("id");
+
+    if ($shareAccessElement = $shareDoc->getElementsByTagName("access")->item(0))
+        $shareAccessPublicYN = $shareAccessElement->getAttribute("public");
+
+    if ($shareAccessPublicYN != "yes")
+        $share_accesspublic = 0;
+    else
+        $share_accesspublic = 1;
+
+
+    if ($rsyncDomElement = $shareDoc->getElementsByTagName("rsync")->item(0)) {
+
+        if ($attribute = $rsyncDomElement->hasAttribute("max_connections"))
+            $share_rsync_max_connections = $rsyncDomElement->getAttribute("max_connections");
+
+        if ($attribute = $rsyncDomElement->hasAttribute("use_chroot"))
+            $share_rsync_use_chroot = $rsyncDomElement->getAttribute("use_chroot");
+
+
+        if ($attribute = $rsyncDomElement->hasAttribute("write_only"))
+            $share_rsync_write_only = $rsyncDomElement->getAttribute("write_only");
+
+        if ($attribute = $rsyncDomElement->hasAttribute("read_only"))
+            $share_rsync_read_only = $rsyncDomElement->getAttribute("read_only");
+
+        if ($attribute = $rsyncDomElement->hasAttribute("list"))
+            $share_rsync_list = $rsyncDomElement->getAttribute("list");
+
+        if ($attribute = $rsyncDomElement->hasAttribute("comment"))
+            $share_rsync_comment = $rsyncDomElement->getAttribute("comment");
+
+        if ($attribute = $rsyncDomElement->hasAttribute("fake_super"))
+            $share_rsync_fake_super = $rsyncDomElement->getAttribute("fake_super");
+
+    }
+
+    if ($smbDomElement = $shareDoc->getElementsByTagName("smb")->item(0)) {
+        $share_smb_sharename = $smbDomElement->getAttribute("sharename");
+
+        if ($smbDomElement->getAttribute("smb_oplocks") != "no")
+            $share_smb_oplocks = 1;
+        else
+            $share_smb_oplocks = 0;
+
+        if ($smbDomElement->getAttribute("dos_filemode") != "no")
+            $share_smb_dos_filemode = 1;
+        else
+            $share_smb_dos_filemode = 0;
+
+        if ($smbDomElement->getAttribute("dos_filetimes") != "no")
+            $share_smb_dos_filetimes = 1;
+        else
+            $share_smb_dos_filetimes = 0;
+
+        if ($smbDomElement->getAttribute("dos_filetime_resolution") != "no")
+            $share_smb_dos_filetime_resolution = 1;
+        else
+            $share_smb_dos_filetime_resolution = 0;
+
+        if ($smbDomElement->getAttribute("fake_directory_create_times") != "no")
+            $share_smb_fake_directory_create_times = 1;
+        else
+            $share_smb_fake_directory_create_times = 0;
+
+        if ($smbDomElement->getAttribute("browseable") != "no")
+            $share_smb_browseable = 1;
+        else
+            $share_smb_browseable = 0;
+
+        if (strcmp($smbDomElement->getAttribute("smb_force_security_mode"),"0200") != 0)
+            $share_smb_force_security_mode = "0";
+        else
+            $share_smb_force_security_mode = "0200";
+
+        if ($smbDomElement->getAttribute("csc_policy") != "manual")
+            $share_smb_csc_policy = $smbDomElement->getAttribute("csc_policy");
+        else
+            $share_smb_csc_policy = "manual";
+    }
+
+
+    $nfsAttrList = array("anonuid"=>"99", "anongid"=>"99", "insecure"=>"no",
+                         "secure"=>"yes",
+                         "no_root_squash"=>"no", "all_squash"=>"no",
+                         "root_squash"=>"yes",
+                         "no_wdelay"=>"yes", "wdelay"=>"no", "sync"=>"yes",
+                         "async"=>"no");  // set the defaults for when the attrs
+                                          // are not available in the xml file
+
+    $domNetworks = $shareDoc->getElementsByTagName("network");
+
+    foreach ($domNetworks as $domNetwork) {
+
+        $str = "";
+        $dnNetworkName = $domNetwork->getAttribute("network");
+        $dnAccess = $domNetwork->getAttribute("access");
+        $dnSmb = $domNetwork->getAttribute("smb");
+        $dnNfs = $domNetwork->getAttribute("nfs");
+        $dnAfp = $domNetwork->getAttribute("afp");
+        $dnNoSquash = $domNetwork->getAttribute("nosquash");
+        $dnHttp = $domNetwork->getAttribute("http");
+        $dnFtp = $domNetwork->getAttribute("ftp");
+        $dnInsecure = $domNetwork->getAttribute("insecure");
+        $dnRsync = $domNetwork->getAttribute("rsync");
+        
+        $nfsAttrArray = array();
+        
+        foreach($nfsAttrList as $nfsAttrKey => $nfsAttrValue) {
+        
+            if ($domNetwork->hasAttribute($nfsAttrKey))
+                $domAttr = $domNetwork->getAttribute($nfsAttrKey);
+            
+            if (!empty($domAttr))
+                $nfsAttrArray[$nfsAttrKey] = $domAttr;     
+            else
+                $nfsAttrArray[$nfsAttrKey] = $nfsAttrValue; 
+        }
+        
+
+        if ($dnAccess == "rw")
+            $str .= "w";
+        else if ($dnAccess == "ro")
+            $str .= "o";
+        else
+            $str .= "n";
+
+        if ($dnSmb == "yes")
+            $str .= "y";
+        else if ($dnSmb == "ro")
+            $str .= "o";
+        else
+            $str .= " ";
+
+        if ($dnNfs == "yes")
+            $str .= "y";
+        else
+            $str .= " ";
+
+        if ($dnAfp == "yes")
+            $str .= "y";
+        else
+            $str .= " ";
+
+        if ($dnNoSquash == "yes")
+            $str .= "y";
+        else
+            $str .= " ";
+
+        if ($dnHttp == "yes")
+            $str .= "y";
+        else if ($dnHttp == "ro")
+            $str .= "o";
+        else
+            $str .= " ";
+
+        $str .= "-"; // for removed NFS ACLs
+        $str .= " "; // for old oplocks field
+
+        if ($dnInsecure == "yes")
+            $str .= "y";
+        else
+            $str .= " ";
+
+        if ($dnFtp == "yes")
+            $str .= "y";
+        else if ($dnFtp == "ro")
+            $str .= "o";
+        else
+            $str .= " ";
+
+        if ($dnRsync == "yes")
+            $str .= "y";
+        else if ($dnRsync == "ro")
+            $str .= "o";
+        else
+            $str .= " ";
+
+        for ($i = 0; $i < count($networks_network); $i++) {
+
+            if ($networks_name[$i] == $dnNetworkName) {
+                
+                $networks_access[$i] = $str;
+                $shaNet = sha1($networks_name[$i] . $networks_network[$i]);
+                $networks_nfs[$shaNet] = $nfsAttrArray;   
+            }
+
+       }
+
+    }
+
+    
+
+
+    $groups_gid = array();
+    $groups_name = array();
+    $groups_members = array();
+    $groups_properties = array();
+
+    endgrent();
+
+    while ($group_info = getgrent())
+    {
+            if  (($group_info["gr_gid"] >= $global_min_gid))
+            {
+                    array_push($groups_gid, $group_info["gr_gid"]);
+                    array_push($groups_name, $group_info["gr_name"]);
+                    array_push($groups_members, $group_info["gr_mem"]);
+                    array_push($groups_properties, "Unknown");
+            }
+    }
+
+    endgrent();
+
+    if (strncasecmp($authobj->globalSettings['nss_nis'], "enabled", 7) == 0)
+    {
+            // add NIS groups
+
+            $groupp = popen("export LANG=C; /usr/bin/sudo /usr/bin/ypcat group", "r");
+
+            $i = 0;
+            while (!feof($groupp))
+            {
+                    $gresult[$i] = explode(":", fgets($groupp, 4096));
+
+                    foreach (($gresult[$i]) as $gresultitem)
+                            $gresultitem = trim($gresultitem);
+
+                    if ((strlen($gresult[$i][0]) > 0) && ($gresult[$i][2] >= $global_min_gid))
+                    {
+                            for ($j = 0; $j < count($groups_gid); $j++)
+                                    if (($groups_gid[$j] == $gresult[$i][2]) && ($groups_name[$j] == $gresult[$i][0]) && ($groups_properties[$j] == "Unknown"))
+                                            $groups_properties[$j] = "NIS";
+                    }
+
+                    $i++;
+            }
+
+            pclose($groupp);
+
+    }
+
+    if (strncasecmp($authobj->globalSettings['nss_ldap'], "enabled", 7) == 0)
+    {
+            // add LDAP groups
+
+            $groupGID = array();
+            foreach (getLDAPgroup() as $ldapgroup)
+                    $groupGID[$ldapgroup[gid]] = $ldapgroup[name];
+
+            for ($j = 0; $j < count($groups_gid); $j++)
+                    if ($groupGID[$groups_gid[$j]] == $groups_name[$j])
+                            $groups_properties[$j] = "LDAP";
+    }
+
+    if (strncasecmp($authobj->globalSettings['nss_hesiod'], "enabled", 7) == 0)
+    {
+            // add Hesiod groups
+    }
+
+    // add local groups
+
+    $groupp = popen("export LANG=C; /usr/bin/sudo /bin/cat /etc/group", "r");
+    $i = 0;
+    while (!feof($groupp)) {
+            $gresult[$i] = explode(":", fgets($groupp, 4096));
+            foreach (($gresult[$i]) as $gresultitem)
+                    $gresultitem = trim($gresultitem);
+
+            if ((strlen($gresult[$i][0]) > 0) && ($gresult[$i][2] >= $global_min_gid)) {
+                    for ($j = 0; $j < count($groups_gid); $j++)
+                            if (($groups_gid[$j] == $gresult[$i][2]) && ($groups_name[$j] == $gresult[$i][0]) && ($groups_properties[$j] == "Unknown"))
+                                    $groups_properties[$j] = "Local";
+            }
+
+            $i++;
+    }
+
+    pclose($groupp);
+
+    $users_uid = array();
+    $users_name = array();
+    $users_gid = array();
+    $users_gname = array();
+    $users_type = array();
+
+    foreach (get_users() as $user_info) {
+        if  (($user_info["pw_uid"] >= $global_min_uid)) {
+                array_push($users_uid, $user_info["pw_uid"]);
+                array_push($users_name, $user_info["pw_name"]);
+                $ugid = $user_info["pw_gid"];
+                array_push($users_gid, $ugid);
+
+                $found = 0;
+                for ($i = 0; $i < count($groups_gid); $i++)
+                        if ($groups_gid[$i] == $ugid)
+                        {
+                                array_push($users_gname, $groups_name[$i]);
+                                $found = 1;
+                                break;
+                        }
+
+                if ($found == 0)
+                        array_push($users_gname, "N/A");
+
+                array_push($users_type, "Unknown");
+        }
+    }
+
+    if (strncasecmp($authobj->globalSettings['nss_nis'], "enabled", 7) == 0) {
+        // add NIS users
+
+        $userp = popen("export LANG=C; /usr/bin/sudo /usr/bin/ypcat passwd", "r");
+
+        $i = 0;
+        while (!feof($userp)) {
+                $uresult[$i] = explode(":", fgets($userp, 4096));
+
+                foreach (($uresult[$i]) as $uresultitem)
+                        $uresultitem = trim($uresultitem);
+
+                if ((strlen($uresult[$i][0]) > 0) && ($uresult[$i][2] >= $global_min_uid)) {
+                        for ($j = 0; $j < count($users_uid); $j++)
+                                if (($users_uid[$j] == $uresult[$i][2]) && ($users_name[$j] == $uresult[$i][0]) && ($users_type[$j] == "Unknown"))
+                                        $users_type[$j] = "NIS";
+                }
+
+                $i++;
+        }
+
+        pclose($userp);
+
+    }
+
+    if (strncasecmp($authobj->globalSettings['nss_ldap'], "enabled", 7) == 0) {
+        // add LDAP users
+
+        $userUID = array();
+        foreach (getLDAPuser() as $ldapuser)
+                $userUID[$ldapuser[uid]] = $ldapuser[name];
+
+        for ($j = 0; $j < count($users_uid); $j++)
+                        if ($userUID[$users_uid[$j]] == $users_name[$j])
+                                $users_type[$j] = "LDAP";
+    }
+
+    if (strncasecmp($authobj->globalSettings['nss_hesiod'], "enabled", 7) == 0) {
+            // add Hesiod users
+    }
+
+    // add local users
+
+    $userp = popen("export LANG=C; /usr/bin/sudo /bin/cat /etc/passwd", "r");
+    $i = 0;
+    while (!feof($userp)) {
+        $uresult[$i] = explode(":", fgets($userp, 4096));
+        foreach (($uresult[$i]) as $uresultitem)
+                $uresultitem = trim($uresultitem);
+
+        if ((strlen($uresult[$i][0]) > 0) && ($uresult[$i][2] >= $global_min_uid)) {
+                for ($j = 0; $j < count($users_uid); $j++)
+                        if (($users_uid[$j] == $uresult[$i][2]) && ($users_name[$j] == $uresult[$i][0]) && ($users_type[$j] == "Unknown"))
+                                $users_type[$j] = "Local";
+        }
+
+        $i++;
+    }
+
+    pclose($userp);
+
+    if ($sortorder == "gname")
+            array_multisort($groups_name, $groups_properties, $groups_gid);
+    else if ($sortorder == "gid")
+            array_multisort($groups_gid, $groups_name, $groups_properties);
+    else if ($sortorder == "gtype")
+            array_multisort($groups_properties, $groups_gid, $groups_name);
+
+
+
+
+    /* change functions */
+
+
+    if ($action == "setfacl") {
+
+        for ($i = 0; $i < count($groups_name); $i++) {
+
+            $gid = $groups_gid[$i];
+            $xPath = "//group[@id = '$gid']";
+            $rootElement = $shareDoc->getElementsByTagName("info")->item(0);
+
+            if (!$groupElement = $shareDoc->runXpathQuery($xPath)->item(0)) {
+                $groupElement = $shareDoc->createElement("group");
+                $rootElement->appendChild($groupElement);
+                $groupElement->setAttribute("id", $gid);
+
+            }
+
+
+            if (isset($primary) && ($groups_gid[$i] == $primary)) {
+                $groupElement->setAttribute("read", "yes");
+                $groupElement->setAttribute("write", "yes");
+                $groupElement->setAttribute("access", "yes");
+            }
+
+            else if (isset(${$gid . "fsaccess"})) {
+
+                $fsaccess = ${$gid . "fsaccess"};
+
+                if ($fsaccess == "no") {
+                    $groupElement->setAttribute("read", "no");
+                    $groupElement->setAttribute("write", "no");
+                    $groupElement->setAttribute("access", "no");
+                }
+
+                else if ($fsaccess == "ro") {
+                    $groupElement->setAttribute("read", "yes");
+                    $groupElement->setAttribute("write", "no");
+                    $groupElement->setAttribute("access", "yes");
+                }
+
+                else if ($fsaccess == "rw") {
+                    $groupElement->setAttribute("read", "yes");
+                    $groupElement->setAttribute("write", "yes");
+                    $groupElement->setAttribute("access", "yes");
+
+                }
+
+                else {
+
+                    $groupElement->setAttribute("read", "no");
+                    $groupElement->setAttribute("write", "no");
+                    $groupElement->setAttribute("access", "no");
+                }
+
+            }
+
+        }
+
+        if (isset($primary)) {
+
+                $xPath = "//primary";
+                if (!$primaryElement = $shareDoc->runXpathQuery($xPath)->item(0)) {
+                    $primaryElement = $shareDoc->createElement("primary");
+                    $rootElement->appendChild($primaryElement);
+                    $primaryElement->setAttribute("id", $primary);
+                }
+
+                else
+                    $primaryElement->setAttribute("id", $primary);
+        }
+
+
+
+        $string = $shareDoc->saveXML();
+        $file = new File($SHARE_INFO_FILE);
+        $file->Clear();
+        $file->AddLine($string);
+        $file->Save();
+
+        apply_configuration(array("services" => "reload", "chmod" => "yes", "chmod_path" => ($share_parent . "/" . $share_name)));
+
+        header("Location: ./shares_edit.html?sort=" . $sortorder . "&sharepath=" . urlencode($sharepath));
+        exit;
+    }
+
+    if ($actionnewsharename == "Change") {
+
+        /* check whether a folder with the new name exists */
+
+        if (is_dir($share_parent . "/" . $share_name) && is_file($share_parent . "/" . $share_name . ".info.xml")
+			&& (!strstr($newsharename, '/')) && (!(is_dir($share_parent . "/" . $newsharename)))) {
+
+            exec("export LANG=C; /usr/bin/sudo /bin/mv -f " . escapeshellarg($share_parent . "/" . $share_name) . " " .
+                    escapeshellarg($share_parent . "/" . $newsharename), $output, $ret);
+                if ($ret != 0)
+                    return $output;
+
+            exec("export LANG=C; /usr/bin/sudo /bin/mv -f " . escapeshellarg($share_parent . "/" . $share_name . ".info.xml") . " " .
+                    escapeshellarg($share_parent . "/" . $newsharename . ".info.xml"), $output, $ret);
+                if ($ret != 0)
+                    return $output;
+
+            header("Location: ./shares_edit.html?sort=" . $sortorder . "&sharepath=" .
+                    urlencode($share_parent . "/" . $newsharename . "/"));
+                exit;
+
+        }
+
+        apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+
+        header("Location: ./shares_edit.html?sort=" . $sortorder . "&sharepath=" .
+                urlencode($share_parent . "/" . $share_name . "/"));
+	    exit;
+    }
+
+    if ($actionnewsharedescription == "Change") {
+
+        if ($keyElement = $shareDoc->runXpathQuery($xPathDescription)->item(0)) {
+            $keyElement->setAttribute("value", htmlentities($newsharedescription));
+
+            $string = $shareDoc->saveXML();
+
+            /* save out to file */
+
+            $file = new File($SHARE_INFO_FILE);
+            $file->Clear();
+            $file->AddLine($string);
+            $file->Save();
+
+            apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+
+        }
+
+
+
+        header("Location: ./shares_edit.html?sort=" . $sortorder . "&sharepath=" . urlencode($sharepath));
+        exit;
+
+    }
+
+
+    if ($actionnewsmbsharename == "Change") {
+
+        /* check whether the tag exists, and if not, create it */
+
+        if (!$shareDoc->getElementsByTagName("smb")->item(0)) {
+
+            $rootNode = $shareDoc->getElementsByTagName("info")->item(0);
+            $smbElement = $shareDoc->createElement("smb");
+            $rootNode->appendChild($smbElement);
+            $smbElement->setAttribute("sharename", htmlentities($newsmbsharename));
+
+        }
+
+        /* otherwise just update the existing tag */
+
+        else
+            $smbDomElement->setAttribute("sharename", htmlentities($newsmbsharename));
+
+        $string = $shareDoc->saveXML();
+
+        /* save out to file */
+
+        $file = new File($SHARE_INFO_FILE);
+        $file->Clear();
+        $file->AddLine($string);
+        $file->Save();
+
+        apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+
+        header("Location: ./shares_edit.html?sort=" . $sortorder . "&sharepath=" . urlencode($sharepath));
+        exit;
+
+    }
+
+
+    if ($action == "setnacl") {
+
+
+        if ((isset($rsyncusechroot)) && ($rsyncusechroot == "on"))
+            $config_rsync_use_chroot = "yes";
+
+        if (isset($rsynccomment))
+            $config_rsync_comment = $rsynccomment;
+        else
+            $config_rsync_comment = "";
+
+        if (isset($rsyncmaxconnections))
+            $config_rsync_max_connections = $rsyncmaxconnections;
+        else
+            $config_rsync_max_connections = $share_rsync_max_connections;
+
+        if ((isset($rsyncwriteonly)) && ($rsyncwriteonly == "on"))
+            $config_rsync_write_only = "yes";
+        else
+            $config_rsync_write_only = "no";
+
+        if ((isset($rsyncreadonly)) && ($rsyncreadonly == "on"))
+            $config_rsync_read_only = "yes";
+        else
+            $config_rsync_read_only = "no";
+
+        if ((isset($rsynclist)) && ($rsynclist == "on"))
+            $config_rsync_list = "yes";
+        else
+            $config_rsync_list = "no";
+
+        if ((isset($rsyncfakesuper)) && ($rsyncfakesuper == "on"))
+            $config_rsync_fake_super = "yes";
+        else
+            $config_rsync_fake_super = "no"; 
+
+        if (!$rsyncElement = $shareDoc->getElementsByTagName("rsync")->item(0)) {
+
+            $rsyncElement = $shareDoc->createElement("rsync");
+            $rootElement = $shareDoc->getElementsByTagName("info")->item(0);
+            $rootElement->appendChild($rsyncElement);
+
+        }
+
+        $rsyncElement->setAttribute("write_only", $config_rsync_write_only);
+        $rsyncElement->setAttribute("read_only", $config_rsync_read_only);
+        $rsyncElement->setAttribute("list", $config_rsync_list);
+        $rsyncElement->setAttribute("use_chroot", $config_rsync_use_chroot);
+        $rsyncElement->setAttribute("max_connections", $config_rsync_max_connections);
+        $rsyncElement->setAttribute("comment", $config_rsync_comment);
+        $rsyncElement->setAttribute("fake_super", $config_rsync_fake_super);
+
+
+
+
+
+        if ((isset($smboplocks)) && ($smboplocks == "on"))
+            $config_smb_oplocks = "yes";
+        else
+            $config_smb_oplocks = "no";
+
+        if((isset($smbdosfilemode)) && ($smbdosfilemode == "on"))
+            $config_dos_filemode = "yes";
+        else
+            $config_dos_filemode =  "no";
+
+        if((isset($smbdosfiletimeresolution)) && ($smbdosfiletimeresolution == "on"))
+            $config_dos_filetime_resolution = "yes";
+        else
+            $config_dos_filetime_resolution = "no";
+
+        if((isset($smbdosfiletimes)) && ($smbdosfiletimes == "on"))
+            $config_dos_filetimes = "yes";
+        else
+            $config_dos_filetimes = "no";
+
+        if((isset($smbfakedirectorycreatetimes)) && ($smbfakedirectorycreatetimes == "on"))
+            $config_fake_directory_create_times = "yes";
+        else
+            $config_fake_directory_create_times = "no";
+
+        if((isset($smbforcesecuritymode)) && (strcmp($smbforcesecuritymode,"0200") != 0))
+            $config_smb_force_security_mode = "0";
+        else
+            $config_smb_force_security_mode = "0200";
+
+        if((isset($smbcscpolicy)) && ($smbcscpolicy != "manual"))
+            $config_csc_policy = $smbcscpolicy;
+        else
+            $config_csc_policy = "manual";
+
+        if((isset($smbbrowseable)) && ($smbbrowseable == "on"))
+            $config_browseable = "yes";
+        else
+            $config_browseable = "no";
+
+
+
+        if (!$smbElement = $shareDoc->getElementsByTagName("smb")->item(0)) {
+
+            $smbElement = $shareDoc->createElement("smb");
+
+            $rootElement = $shareDoc->getElementsByTagName("info")->item(0);
+            $rootElement->appendChild($smbElement);
+
+
+        }
+
+        $smbElement->setAttribute("browseable", $config_browseable);
+        $smbElement->setAttribute("csc_policy", $config_csc_policy);
+        $smbElement->setAttribute("smb_force_security_mode", $config_smb_force_security_mode);
+        $smbElement->setAttribute("fake_directory_create_times", $config_fake_directory_create_times);
+        $smbElement->setAttribute("dos_filetimes", $config_dos_filetimes);
+        $smbElement->setAttribute("dos_filetime_resolution", $config_dos_filetime_resolution);
+        $smbElement->setAttribute("smb_oplocks", $config_smb_oplocks);
+        $smbElement->setAttribute("dos_filemode", $config_dos_filemode);
+
+
+
+
+
+        for ($i = 0; $i < count($networks_network); $i++) {
+
+            $netName = $networks_name[$i];
+            $xPath = "//network[@network = '$netName']";
+            $rootElement = $shareDoc->getElementsByTagName("info")->item(0);
+
+            if (!$networkElement = $shareDoc->runXpathQuery($xPath)->item(0)) {
+
+                $networkElement = $shareDoc->createElement("network");
+                $rootElement->appendChild($networkElement);
+                $networkElement->setAttribute("network", $netName);
+            }
+
+
+            $services = array("http", "rsync", "ftp", "smb");
+            $shaNet = sha1($netName . $networks_network[$i]);
+
+            foreach ($services as $key => $service) {
+
+                if (${$shaNet . $service} == "yes")
+                    $networkElement->setAttribute($service, "yes");
+                else if (${$shaNet . $service} == "ro")
+                    $networkElement->setAttribute($service, "ro");
+                else
+                    $networkElement->setAttribute($service, "no");
+
+            }
+
+            if (${$shaNet . "access"} == "rw")
+                $networkElement->setAttribute("access", "rw");
+            else if (${$shaNet . "access"} == "ro")
+                $networkElement->setAttribute("access", "ro");
+            else
+                $networkElement->setAttribute("access", "no");
+
+           /* $nfsAttrs = array("insecure", "nosquash");
+
+            foreach ($nfsAttrs as $key => $attr) {
+
+                if (${$shaNet . $attr} == "on")
+                    $networkElement->setAttribute($attr, "yes");
+                else
+                    $networkElement->setAttribute($attr, "no");
+            }*/
+            
+            $nfsSquashAttrs = array("root_squash", "all_squash", "no_root_squash");
+            
+            foreach($nfsSquashAttrs as $key => $attr) {
+                
+                if(${$shaNet . "uid_gid_map"} == $attr) 
+                    $networkElement->setAttribute($attr, "yes");
+                else
+                    $networkElement->setAttribute($attr, "no"); 
+                
+            }
+            
+            $networkElement->setAttribute("anonuid", ${$shaNet."anonuid"});
+            $networkElement->setAttribute("anongid", ${$shaNet."anongid"});
+            
+            $syncAttrs = array("sync", "async");
+            
+            foreach($syncAttrs as $key => $attr) {
+            
+                if(${$shaNet . "io_mode"} == $attr)
+                    $networkElement->setAttribute($attr, "yes");
+                else
+                    $networkElement->setAttribute($attr, "no"); 
+            
+            }
+            
+            $wdelayAttrs = array("no_wdelay", "wdelay");
+            
+            foreach($wdelayAttrs as $key => $attr) {
+            
+                if(${$shaNet . "write_delay"} == $attr)     
+                    $networkElement->setAttribute($attr, "yes");
+                else
+                    $networkElement->setAttribute($attr, "no");
+            }
+            
+            $secureAttrs = array("secure", "insecure");
+            
+            foreach($secureAttrs as $key => $attr) {
+            
+                if(${$shaNet . "secure_insecure"} == $attr)
+                    $networkElement->setAttribute($attr, "yes");
+                else
+                    $networkElement->setAttribute($attr, "no"); 
+            }
+            
+
+            $networkElement->setAttribute("afp", "no");
+
+        }
+
+
+
+        $string = $shareDoc->saveXML();
+
+        /* save out to file */
+
+        $file = new File($SHARE_INFO_FILE);
+        $file->Clear();
+        $file->AddLine($string);
+        $file->Save();
+
+        if ($smbrestart == "on")
+            apply_configuration(array("services" => "restart", "chmod" => "no", "chmod_path" => ""));
+        else
+            apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+            
+        
+        
+
+        header("Location: ./shares_edit.html?sort=" . $sortorder . "&sharepath=" . urlencode($sharepath));
+        exit;
+
+
+    }
+
+    if ($action == "setaccesscontrolmode") {
+
+        $rootElement = $shareDoc->getElementsByTagName("info")->item(0);
+        $xPath = "//access";
+
+        if ($shareaccesspublic != "public")
+            $access_public = "no";
+        else
+            $access_public = "yes";
+
+        if (!$accessElement = $shareDoc->runXpathQuery($xPath)->item(0)) {
+
+            $accessElement = $shareDoc->createElement("access");
+            $rootElement->appendChild($accessElement);
+
+        }
+
+        $accessElement->setAttribute("public", $access_public);
+
+
+        $string = $shareDoc->saveXML();
+
+        /* save out to file */
+
+        $file = new File($SHARE_INFO_FILE);
+        $file->Clear();
+        $file->AddLine($string);
+        $file->Save();
+
+        apply_configuration(array("services" => "reload", "chmod" => "yes", "chmod_path" => ($share_parent . "/" . $share_name)));
+
+        header("Location: ./shares_edit.html?sort=" . $sortorder . "&sharepath=" . urlencode($sharepath));
+        exit;
+
+    }
+
+
+    generic_header(array("title" => _("Shares : Edit Share")));
+    single_begin(array());
+
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+
+function smb_nacl_onchange()
+{
+	document.naclform.smbrestart.checked = true;
+}
+
+// -->
+</script>
+
+<p>&nbsp;</p>
+<?php
+    nested_tab_begin("C_SHARES");
+
+    if (!$homespathdefined) {
+        
+
+
+    //check whether homespath is defined
+
+    print("<h3 align=\"center\">Edit share " . htmlentities($sharepath) . "</h3>\n");
+
+
+
+	printMessageBlock("info", "<p>Please use unique SMB share name overrides as duplicates automatically " .
+                "have a suffix attached to them.<br/><span style=\"color: brown; background-color: transparent;\">Existing " .
+                "shares with duplicate names can have their suffix changed every time more duplicates are created.</span></p>\n");
+
+	print("<form action=\"shares_edit.html\" method=\"post\">\n");
+	print("<input type=\"hidden\" name=\"sort\" value=\"" . $sortorder . "\" />\n");
+	print("<input type=\"hidden\" name=\"sharepath\" value=\"" . htmlentities($sharepath) . "\" />\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\" align=\"right\">Share name:</td>\n");
+	print("\t<td class=\"color_table_row1\"><input type=\"text\" name=\"newsharename\" value=\"" . htmlentities($share_name) . "\" /></td>\n");
+	print("\t<td class=\"color_table_row1\"><input type=\"submit\" name=\"actionnewsharename\" value=\"Change\" /></td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\" align=\"right\">Share description:</td>\n");
+	print("\t<td class=\"color_table_row2\"><input type=\"text\" name=\"newsharedescription\" value=\"" . htmlentities($share_description) . "\" /></td>\n");
+	print("\t<td class=\"color_table_row2\"><input type=\"submit\" name=\"actionnewsharedescription\" value=\"Change\" /></td>\n");
+	print("</tr>\n");
+        print("<tr>\n");
+        print("\t<td class=\"color_table_heading\" align=\"right\">Override SMB/Rsync share name:</td>\n");
+        print("\t<td class=\"color_table_row1\"><input type=\"text\" name=\"newsmbsharename\" value=\"" . htmlentities($share_smb_sharename) . "\" /></td>\n");
+        print("\t<td class=\"color_table_row1\"><input type=\"submit\" name=\"actionnewsmbsharename\" value=\"Change\" /></td>\n");
+        print("</tr>\n");
+	print("</table>\n");
+	print("</form>\n");
+
+	print("<p align=\"center\">&nbsp;</p>\n");
+
+	print("<p align=\"center\">[&nbsp;<a href=\"shares.html\">Back to shares list</a>&nbsp;]</p>\n");
+
+	print("<p align=\"center\">&nbsp;</p>\n");
+
+	print("<hr size=\"1\" />\n");
+
+
+
+
+        print("<h3 align=\"center\">Share Access Control Mode </h3>\n");
+        print("<form action=\"shares_edit.html\" method=\"post\">\n");
+	print("<input type=\"hidden\" name=\"sharepath\" value=\"" . htmlentities($sharepath) . "\" />\n");
+	print("<input type=\"hidden\" name=\"action\" value=\"setaccesscontrolmode\" />\n");
+?>
+	<div align="center">
+	<table cellpadding="8" cellspacing="2" border="0">
+	<tr>
+		<td><input name="shareaccesspublic" type="radio" value="public"<?php print(($share_accesspublic != 0) ? " checked=\"checked\"" : ""); ?> />&nbsp;<strong>Public guest access</strong></td>
+	</tr>
+	<tr>
+		<td><input name="shareaccesspublic" type="radio" value="controlled"<?php print(($share_accesspublic == 0) ? " checked=\"checked\"" : ""); ?> />&nbsp;<strong>Controlled access</strong></td>
+	</tr>
+	</table>
+	</div>
+<?php
+    print("<p align=\"center\"><input type=\"submit\" name=\"submit\" value=\"Update\" /></p>\n");
+	print("</form>\n");
+    print("<p align=\"center\">&nbsp;</p>\n");
+    print("<hr size=\"1\" />\n");
+
+if ($share_accesspublic != 1) {
+
+	print("<h3 align=\"center\">Group access configuration</h3>\n");
+        print("<p align=\"center\">[&nbsp;<a href=\"shares.html\">Back to shares list</a>&nbsp;]</p>\n");
+
+	if (($groups_primary == 0) && ($share_accesspublic == 0))
+		printMessageBlock("warning","<p>A primary group has not been set yet. This share will not be enabled until a primary group is set first or the share has been made a guest share.</p>\n");
+
+	printMessageBlock("info", "<p>If you want to see groups from network directory servers here, please configure them in the <a href=\"index.html\">authentication section</a>.</p>\n");
+
+	print("<form action=\"shares_edit.html\" method=\"post\">\n");
+	print("<input type=\"hidden\" name=\"sort\" value=\"" . $sortorder . "\" />\n");
+	print("<input type=\"hidden\" name=\"sharepath\" value=\"" . htmlentities($sharepath) . "\" />\n");
+	print("<input type=\"hidden\" name=\"action\" value=\"setfacl\" />\n");
+
+
+
+?>
+
+
+	<div align="center" class="scrolled-groups">
+	<table cellpadding="8" cellspacing="2" border="0">
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><a style="cursor: help;" title="Sort groups by GID" href="shares_edit.html?sort=gid&amp;sharepath=<?php print(urlencode($sharepath)); ?>">GID</a></strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><a style="cursor: help;" title="Sort groups by Name" href="shares_edit.html?sort=gname&amp;sharepath=<?php print(urlencode($sharepath)); ?>">Group Name</a></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><a style="cursor: help;" title="Sort groups by Type" href="shares_edit.html?sort=gtype&amp;sharepath=<?php print(urlencode($sharepath)); ?>">Type</a></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><span style="cursor: help;" title="Set this group as the primary group">PG</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><span style="cursor: help;" title="No access">NO</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><span style="cursor: help;" title="Read-only access">RO</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong><span style="cursor: help;" title="Read and write access">RW</span></strong></td>
+	</tr>
+
+<?php
+	$dcolor = 0;
+
+	for ($i = 0; $i < count($groups_name); $i++)
+	{
+		if ($dcolor == 0)
+		{
+			$dcolor = 1;
+			$dvalue = $GLOBALS["color_table_row1"];
+		}
+		else
+		{
+			$dcolor = 0;
+			$dvalue = $GLOBALS["color_table_row2"];
+		}
+
+		if ($groups_gid[$i] == $groups_primary)
+			$dvalue = $GLOBALS["color_table_green"];
+                        
+                $greentable = $GLOBALS["color_table_green"];
+                $ambertable = $GLOBALS["color_table_amber"];
+                $redtable = $GLOBALS["color_table_red"];
+
+		print("<tr>\n");
+
+		print("\t<td valign=\"middle\" bgcolor=\"" . $dvalue . "\">");
+		print($groups_gid[$i]);
+		print("</td>\n");
+
+		print("\t<td valign=\"middle\" bgcolor=\"" . $dvalue . "\">");
+		print("<a href=\"#\" onclick=\"return !showPopup('popup-" . $groups_gid[$i] . "', event);\">");
+		print($groups_name[$i]);
+		print("</a>");
+
+		print("</td>\n");
+
+		print("\t<td valign=\"middle\" align=\"center\" bgcolor=\"" . $dvalue . "\">");
+		print($groups_properties[$i]);
+		print("</td>\n");
+
+		print("\t<td valign=\"middle\" align=\"center\" bgcolor=\"" . $dvalue . "\">");
+		print("<input type=\"radio\" name=\"primary\" value=\"" . $groups_gid[$i] . "\"" . (($groups_gid[$i] == $groups_primary) ? " checked=\"checked\"" : "") . " />");
+		print("</td>\n");
+
+		print("\t<td valign=\"middle\" align=\"center\" bgcolor=\"" . ((((substr($groups_access[$groups_gid[$i]], 0, 1) != "r") && (substr($groups_access[$groups_gid[$i]], 1, 1) != "w") && (substr($groups_access[$groups_gid[$i]], 2, 1) != "a")) && ($groups_gid[$i] != $groups_primary)) ? $redtable : $dvalue) . "\">");
+		print("<input type=\"radio\" name=\"" . $groups_gid[$i] . "fsaccess\" value=\"no\"" . (((substr($groups_access[$groups_gid[$i]], 0, 1) != "r") && (substr($groups_access[$groups_gid[$i]], 1, 1) != "w") && (substr($groups_access[$groups_gid[$i]], 2, 1) != "a")) ? " checked=\"checked\"" : "") . " />");
+		print("</td>\n");
+
+		print("\t<td valign=\"middle\" align=\"center\" bgcolor=\"" . ((((substr($groups_access[$groups_gid[$i]], 0, 1) == "r") && (substr($groups_access[$groups_gid[$i]], 1, 1) != "w") && (substr($groups_access[$groups_gid[$i]], 2, 1) == "a")) && ($groups_gid[$i] != $groups_primary)) ? $ambertable : $dvalue) . "\">");
+		print("<input type=\"radio\" name=\"" . $groups_gid[$i] . "fsaccess\" value=\"ro\"" . (((substr($groups_access[$groups_gid[$i]], 0, 1) == "r") && (substr($groups_access[$groups_gid[$i]], 1, 1) != "w") && (substr($groups_access[$groups_gid[$i]], 2, 1) == "a")) ? " checked=\"checked\"" : "") . " />");
+		print("</td>\n");
+
+		print("\t<td valign=\"middle\" align=\"center\" bgcolor=\"" . ((((substr($groups_access[$groups_gid[$i]], 0, 1) == "r") && (substr($groups_access[$groups_gid[$i]], 1, 1) == "w") && (substr($groups_access[$groups_gid[$i]], 2, 1) == "a")) && ($groups_gid[$i] != $groups_primary)) ? $greentable : $dvalue) . "\">");
+		print("<input type=\"radio\" name=\"" . $groups_gid[$i] . "fsaccess\" value=\"rw\"" . (((substr($groups_access[$groups_gid[$i]], 0, 1) == "r") && (substr($groups_access[$groups_gid[$i]], 1, 1) == "w") && (substr($groups_access[$groups_gid[$i]], 2, 1) == "a")) ? " checked=\"checked\"" : "") . " />");
+		print("</td>\n");
+
+		print("</tr>\n");
+	}
+?>
+	</table>
+	</div>
+<?php
+
+
+
+	for ($i = 0; $i < count($groups_name); $i++)
+	{
+
+?>
+		<div id="popup-<?php print($groups_gid[$i]); ?>" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="groupspopup">
+		<table cellpadding="10" cellspacing="0" border="0" width="100%">
+		<tr>
+			<td>
+			<p align="center"><strong>Members of the group <em><?php print($groups_name[$i]); ?></em></strong></p>
+			<div align="center">
+			<table cellpadding="8" cellspacing="2" border="0" width="100%">
+			<tr>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>UID</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>User Name</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>User Type</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Primary Group</strong></td>
+			</tr>
+<?php
+			$ucolor = 0;
+			for ($l = 0; $l < count($users_name); $l++)
+				if (in_array($users_name[$l], $groups_members[$i]))
+				{
+					if ($ucolor == 0)
+					{
+						$ucolor = 1;
+						$uvalue = $GLOBALS["color_table_row1"];
+					}
+					else
+					{
+						$ucolor = 0;
+						$uvalue = $GLOBALS["color_table_row2"];
+					}
+
+					print("<tr>\n");
+					print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $users_uid[$l] . "</td>\n");
+					print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $users_name[$l] . "</td>\n");
+					print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $users_type[$l] . "</td>\n");
+					print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $users_gname[$l] . "</td>\n");
+					print("</tr>\n");
+				}
+?>
+			</table>
+			</div>
+			</td>
+		</tr>
+		<tr>
+			<td align="center"><a href="#" onclick="hideCurrentPopup(); return false;">Close Window</a></td>
+		</tr>
+		</table>
+		</div>
+<?php
+	}
+	print("<p align=\"center\"><input type=\"submit\" name=\"submit\" value=\"Update\" /></p>\n");
+	print("</form>\n");
+
+	print("<p align=\"center\">&nbsp;</p>\n");
+
+	print("<hr size=\"1\" />\n");
+
+    } // closing brace for check of share_accesspublic
+
+    } //closing brace for check of homespathdefined
+
+
+
+	print("<h3 align=\"center\">Host access configuration ($sharepath)</h3>\n");
+        print("<p align=\"center\">[&nbsp;<a href=\"shares.html\">Back to shares list</a>&nbsp;]</p>\n");
+
+	if (count($networkAccessList) > 0)
+	{
+		print("<form name=\"naclform\" action=\"shares_edit.html\" method=\"post\">\n");
+		print("<input type=\"hidden\" name=\"sort\" value=\"" . $sortorder . "\" />\n");
+		print("<input type=\"hidden\" name=\"sharepath\" value=\"" . htmlentities($sharepath) . "\" />\n");
+		print("<input type=\"hidden\" name=\"action\" value=\"setnacl\" />\n");
+
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+?>
+	<tr>
+		<td rowspan="5" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Name</strong></td>
+                <td align="center" rowspan="5" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Network</strong></td>
+		<td colspan="3" align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>SMB/CIFS</strong></td>
+		<td rowspan="4" colspan="4" align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>NFS</strong></td>
+		<td rowspan="4" colspan="3" align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>HTTP(S) / WebDAV</strong></td>
+		<td rowspan="4" colspan="3" align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>FTP</strong></td>
+                <td rowspan="2" colspan="3" align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Rsync</strong></td>
+	</tr>
+	<tr>
+		<td align="center" rowspan="2" colspan="3" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><!-- <strong><input name="smboplocks" type="checkbox"<?php print(($share_smb_oplocks > 0) ? "checked=\"checked\"" : ""); ?> /> Enable oplocks</strong> -->
+                <strong><a href="#" onclick="return !showPopup('popup-share_settings', event)">SMB/CIFS Options</a></strong>
+                    <div id="popup-share_settings" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+                        <h3>SMB Share Options</h3>
+                        <table cellspacing="2" cellpadding="8" border="0">
+                            <tr class="color_table_row1">
+                                <td align="right">
+                                    <input name="smboplocks" type="checkbox"<?php print(($share_smb_oplocks > 0) ? " checked=\"checked\"" : ""); ?> />
+                                </td>
+                                <td><strong>Enable oplocks</strong>
+                                </td>
+                            </tr>
+                            <tr class="color_table_row2">
+                                <td align="right">
+                                    <input name="smbdosfilemode" type="checkbox"<?php print(($share_smb_dos_filemode > 0) ? " checked=\"checked\"" : ""); ?> />
+                                </td>
+                                <td><strong>DOS filemode</strong>
+                                </td>
+                            </tr>
+                            <tr class="color_table_row1">
+                                <td align="right">
+                                    <input name="smbdosfiletimeresolution" type="checkbox"<?php print(($share_smb_dos_filetime_resolution > 0) ? " checked=\"checked\"" : ""); ?> />
+                                </td>
+                                <td><strong>DOS filetime resolution</strong>
+                                </td>
+                            </tr>
+                            <tr class="color_table_row2">
+                                <td align="right">
+                                    <input name="smbfakedirectorycreatetimes" type="checkbox"<?php print(($share_smb_fake_directory_create_times > 0) ? " checked=\"checked\"" : "")?> />
+                                </td>
+                                <td><strong>Fake directory create times</strong>
+                                </td>
+                            </tr>
+                            <tr class="color_table_row1">
+                                <td align="right">
+                                    <input name="smbdosfiletimes" type="checkbox"<?php print(($share_smb_dos_filetimes > 0) ? " checked=\"checked\"" : ""); ?> />
+                                </td>
+                                <td><strong>DOS filetimes</strong>
+                                </td>
+                            </tr>
+                            <tr class="color_table_row2">
+                                <td align="right"><span><strong>Force security mode:</strong></span></td>
+                                <td><input name="smbforcesecuritymode" type="text" value="<?php print($share_smb_force_security_mode); ?>" /></td>
+                            </tr>
+                            <tr class="color_table_row1">
+                                <td align="right">
+                                    <input name="smbbrowseable" type="checkbox"<?php print(($share_smb_browseable > 0) ? " checked=\"checked\"" : "" ); ?>/></td><td><strong>Browseable</strong>
+                                </td>
+                            </tr>
+                            <tr class="color_table_row2">
+                                <td align="right"><span style="cursor: help;" title="Client Side Caching"><strong>CSC Policy:</strong></span></td>
+                                <td>
+                                    <select name="smbcscpolicy">
+                                        <option id="smbcscpolicy-manual" value="manual" <?php print(($share_smb_csc_policy == "manual") ? " selected=\"selected\"" : "") ?>>manual</option>
+                                        <option id="smbcscpolicy-programs" value="programs" <?php print(($share_smb_csc_policy == "programs") ? " selected=\"selected\"" : "") ?>>programs</option>
+                                        <option id="smbcscpolicy-documents" value="documents" <?php print(($share_smb_csc_policy == "documents") ? " selected=\"selected\"" : "") ?>>documents</option>
+                                        <option id="smbcscpolicy-disable" value="disable" <?php print(($share_smb_csc_policy == "disable") ? " selected=\"selected\"" : "") ?>>disable</option>
+                                     </select>
+                                </td>
+                            </tr>
+                            <tr><td>&nbsp;</td></tr>
+                        </table>
+                    </div>
+                </td>
+	</tr>
+        <tr>
+            <td align="center" rowspan="2" colspan="3" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>">
+            <strong><a href="#" onclick="return !showPopup('popup-rsync_settings', event)">Rsync Options</a></strong>
+                <div id="popup-rsync_settings" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+                    <h3>Rsync Share Options</h3>
+                    <table cellspacing="2" cellpadding="8" border="0" style="margin-left: auto; margin-right: auto;">
+                        <tr class="color_table_row1"><td align="right"><span><strong>Comment:</strong>&nbsp;&nbsp;</span></td><td align="left"><input name="rsynccomment" type="text" value="<?php print($share_rsync_comment); ?>"/></td></tr>
+                        <tr class="color_table_row1"><td align="right"><span><strong>Max connections:</strong>&nbsp;&nbsp;</span></td><td align="left"><input name="rsyncmaxconnections" type="text" value="<?php print($share_rsync_max_connections); ?>"/></td></tr>
+                        <tr class="color_table_row2"><td align="right"><input name="rsyncusechroot" type="checkbox"<?php print(($share_rsync_use_chroot == "yes") ? " checked=\"checked\"" : ""); ?> /></td><td align="left"><strong>Use chroot</strong></td></tr>
+                        <tr class="color_table_row1"><td align="right"><input name="rsyncwriteonly" type="checkbox"<?php print(($share_rsync_write_only == "yes") ? " checked=\"checked\"" : ""); ?> /></td><td align="left"><strong>Write only</strong></td></tr>
+                        <tr class="color_table_row2"><td align="right"><input name="rsyncreadonly" type="checkbox"<?php print(($share_rsync_read_only == "yes") ? " checked=\"checked\"" : ""); ?> /></td><td align="left"><strong>Read only</strong></td></tr>
+                        <tr class="color_table_row1"><td align="right"><input name="rsynclist" type="checkbox"<?php print(($share_rsync_list == "yes") ? " checked=\"checked\"" : ""); ?> /></td><td align="left"><strong>List module</strong></td></tr> 
+                         <tr class="color_table_row2"><td align="right"><input name="rsyncfakesuper" type="checkbox"<?php print(($share_rsync_fake_super == "yes") ? " checked=\"checked\"" : ""); ?> /></td><td align="left"><strong>Fake Super</strong></td></tr> 
+                        <tr><td>&nbsp;</td><td>&nbsp;</td></tr>
+                    </table>
+                </div>
+            </td>
+        </tr>
+	<tr>
+		<td colspan="3" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><input name="smbrestart" type="checkbox" /> Restart services</strong></td>
+	</tr>
+	<tr>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong>No</strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read-only access">RO</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read and write access">RW</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong>No</strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read-only access">RO</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read and write access">RW</span></strong></td>
+                <td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="NFS Share Client Options">Options</span></strong></td>
+		<!--<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="No Root Squash">NRS</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Insecure">IS</span></strong></td>
+		-->
+                <td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong>No</strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read-only access">RO</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read and write access">RW</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong>No</strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read-only access">RO</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read and write access">RW</span></strong></td>
+                <td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong>No</strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read-only access">RO</span></strong></td>
+		<td align="center" bgcolor="<?php print($GLOBALS["color_table_heading2"]); ?>"><strong><span style="cursor: help;" title="Read and write access">RW</span></strong></td>
+        </tr>
+<?php
+
+		$dcolor = 0;
+
+		for ($i = 0; $i < count($networks_network); $i++) {
+                    if ($dcolor == 0) {
+                            $dcolor = 1;
+                            $dvalue = $GLOBALS["color_table_row1"];
+                    }
+                    else {
+                            $dcolor = 0;
+                            $dvalue = $GLOBALS["color_table_row2"];
+                    }
+
+
+                    $shaNetworkNameNetwork = sha1($networks_name[$i] . $networks_network[$i]);
+                    
+                    $nfsAttrArray = $networks_nfs[$shaNetworkNameNetwork] ;  
+                    
+                    print("<tr>\n");                   
+                      
+                    print("\t<td bgcolor=\"" . $dvalue . "\">" . htmlentities($networks_name[$i]) . "</td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\">" . htmlentities($networks_network[$i]) . "</td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" onchange=\"smb_nacl_onchange()\" name=\"" . $shaNetworkNameNetwork . "smb\" value=\"no\"" . ((substr($networks_access[$i], 1, 1) == " ") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" onchange=\"smb_nacl_onchange()\" name=\"" . $shaNetworkNameNetwork . "smb\" value=\"ro\"" . ((substr($networks_access[$i], 1, 1) == "o") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" onchange=\"smb_nacl_onchange()\" name=\"" . $shaNetworkNameNetwork . "smb\" value=\"yes\"" . ((substr($networks_access[$i], 1, 1) == "y") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . $shaNetworkNameNetwork . "access\" value=\"no\"" . ((substr($networks_access[$i], 0, 1) == "n") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . $shaNetworkNameNetwork . "access\" value=\"ro\"" . ((substr($networks_access[$i], 0, 1) == "o") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . $shaNetworkNameNetwork . "access\" value=\"rw\"" . ((substr($networks_access[$i], 0, 1) == "w") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><strong><a href=\"#\" onclick=\"return !showPopup('popup-nfsedit-" . $shaNetworkNameNetwork. "', event)\">Edit</a></strong>");
+                          ?>
+                    
+                    <div id="popup-nfsedit-<?php print($shaNetworkNameNetwork); ?>" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="sharespopup">
+                    <h3>NFS Share Client Options</h3>
+                    <h4><?php print("(".$networks_name[$i] . " : " . $networks_network[$i] . ")"); ?></h4>
+                    <table cellspacing="2" cellpadding="8" border="0" style="margin-left: auto; margin-right: auto;">
+                        <tr class="color_table_row1"><td align="right"><span><strong>Anonymous UID:</strong>&nbsp;&nbsp;</span></td><td align="left"><input id="<?php print($shaNetworkNameNetwork); ?>nfsedit-anon_uid" name="<?php print($shaNetworkNameNetwork); ?>anonuid" type="text" value="<?php print($nfsAttrArray["anonuid"]); ?>"/></td></tr>
+                        <tr class="color_table_row2"><td align="right"><span><strong>Anonymous GID:</strong>&nbsp;&nbsp;</span></td><td align="left"><input id="<?php print($shaNetworkNameNetwork); ?>nfsedit-anon_gid" name="<?php print($shaNetworkNameNetwork); ?>anongid" type="text" value="<?php print($nfsAttrArray["anongid"]); ?>"/></td></tr>
+                        <tr class="color_table_row1"><td align="right"><span><strong>UID/GID Mapping:</strong>&nbsp;&nbsp;</span></td><td>
+                        
+                            <select id="<?php print($shaNetworkNameNetwork); ?>nfsedit-uid_gid_map" name="<?php print($shaNetworkNameNetwork); ?>uid_gid_map"); ?>">
+                                <option value="root_squash" <?php ($nfsAttrArray["root_squash"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>root_squash</option>
+                                <option value="no_root_squash" <?php ($nfsAttrArray["no_root_squash"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>no_root_squash</option>
+                                <option value="all_squash" <?php ($nfsAttrArray["all_squash"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>all_squash</option>
+                            </select>
+                        
+                        </td></tr>
+                        <tr class="color_table_row2"><td align="right"><span><strong>I/O Mode:</strong>&nbsp;&nbsp;</span></td><td>
+                        
+                            <select id="<?php print($shaNetworkNameNetwork); ?>nfsedit-io_mode" name="<?php print($shaNetworkNameNetwork); ?>io_mode") ?>">
+                                <option value="sync" <?php ($nfsAttrArray["sync"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>sync</option>
+                                <option value="async" <?php ($nfsAttrArray["async"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>async</option>
+                            </select>
+                        
+                        </td></tr>
+                        <tr class="color_table_row1"><td align="right"><span><strong>Write Delay:</strong>&nbsp;&nbsp;</span></td><td align="left">
+                            <select id="<?php print($shaNetworkNameNetwork); ?>nfsedit-write_delay" name="<?php print($shaNetworkNameNetwork); ?>write_delay") ?>">
+                                <option value="wdelay" <?php ($nfsAttrArray["wdelay"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>wdelay</option>
+                                <option value="no_wdelay" <?php ($nfsAttrArray["no_wdelay"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>no_wdelay</option>
+                            </select>
+                        
+                        
+                        </td></tr>
+                        
+                        <tr class="color_table_row2"><td align="right"><span><strong>Request Origin Port:</strong>&nbsp;&nbsp;</span></td><td align="left">
+                            <select id="<?php print($shaNetworkNameNetwork); ?>nfsedit-secure_insecure" name="<?php print(sha1($networks_name[$i] . $networks_network[$i]) . "secure_insecure") ?>">
+                                <option value="secure" <?php ($nfsAttrArray["secure"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>secure (<1024)</option>
+                                <option value="insecure" <?php ($nfsAttrArray["insecure"] == "yes" ? print(" selected=\"selected\"") : ""); ?>>insecure (>1024)</option>
+                            </select>
+                        
+                        
+                        </td></tr>
+                        
+                        <tr><td>&nbsp;</td><td>&nbsp;</td></tr>
+                    </table>
+                </div>
+                          
+                    <?php
+                    
+                    
+                    
+                    print("</td>\n");
+                    
+                   
+                   
+                   
+                   
+                   // print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"checkbox\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "nosquash\"" . ((substr($networks_access[$i], 4, 1) == "y") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    //print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"checkbox\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "insecure\"" . ((substr($networks_access[$i], 8, 1) == "y") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "http\" value=\"no\"" . ((substr($networks_access[$i], 5, 1) == " ") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "http\" value=\"ro\"" . ((substr($networks_access[$i], 5, 1) == "o") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "http\" value=\"yes\"" . ((substr($networks_access[$i], 5, 1) == "y") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "ftp\" value=\"no\"" . ((substr($networks_access[$i], 9, 1) == " ") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "ftp\" value=\"ro\"" . ((substr($networks_access[$i], 9, 1) == "o") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "ftp\" value=\"yes\"" . ((substr($networks_access[$i], 9, 1) == "y") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "rsync\" value=\"no\"" . ((substr($networks_access[$i], 10, 1) == " ") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "rsync\" value=\"ro\"" . ((substr($networks_access[$i], 10, 1) == "o") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\"><input type=\"radio\" name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "rsync\" value=\"yes\"" . ((substr($networks_access[$i], 10, 1) == "y") ? " checked=\"checked\"" : "") . " /></td>\n");
+                    print("</tr>\n");
+
+		}
+
+		print("</table>\n");
+
+		print("<p align=\"center\"><input type=\"submit\" name=\"submit\" value=\"Update\" /></p>\n");
+		print("</form>\n");
+	}
+	else
+		print("<p>A list of networks have not been created yet.<br />You cannot configure network access control unless<br />you create a list of networks in the <a href=\"system.html\">Local Networks</a> section.<br />Until that time, this share will be unavailable.</p>\n");
+
+	print("<hr size=\"1\" />\n");
+
+	print("<div id=\"popup-deleteshare\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"sharespopup\">\n");
+	print("<p align=\"center\"><strong>Are you sure you want to delete<br />this share?</strong></p>\n");
+	print("<p align=\"center\">[&nbsp;<a href=\"shares.html?action=deletefolder&amp;regenerateconfig=yes&amp;sourcepath=" . urlencode($share_parent . "/") . "&amp;folderid=" . urlencode($share_name) . "\">Yes</a> / <a href=\"#\" onclick=\"hideCurrentPopup(); return false;\">NO DON'T DELETE</a>&nbsp;]</p>\n");
+	print("</div>\n");
+
+	print("<p align=\"center\">[&nbsp;<a href=\"#\" onclick=\"return !showPopup('popup-deleteshare', event);\">Delete this share</a>&nbsp;]</p>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+
+
+
+
+?>

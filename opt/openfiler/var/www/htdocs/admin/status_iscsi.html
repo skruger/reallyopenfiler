@@ -1,0 +1,177 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+	include("authenticated.inc");
+
+
+
+
+	generic_header(array("title" => _("Status : iSCSI ")));
+	single_begin(array());
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_STATUS_ISCSI");
+	print("<h3 align=\"center\">iSCSI status</h3>\n");
+
+	if (!(is_file("/proc/net/iet/volume.xml") && is_file("/proc/net/iet/session.xml")))
+	{
+		print("<p>No connections</p>");
+		nested_tab_end();
+		single_end(array());
+		generic_footer(array());
+		exit;
+	}
+
+
+	$volumes = DOMDocument::load("/proc/net/iet/volume.xml");
+	$sessions = DOMDocument::load("/proc/net/iet/session.xml");
+
+	$targets = $sessions->getElementsByTagName("target");
+
+	foreach ($targets as $target)
+	{
+		$tsessions = $target->getElementsByTagName("session");
+
+		foreach ($tsessions as $tsession)
+		{
+			$tconnections = $tsession->getElementsByTagName("connection");
+			$rand_id = $tsession->getAttribute("id");
+?>
+		<div id="popup-<?php print($rand_id); ?>" onclick="event.cancelBubble = true;" onmousedown="dragpopup(this, event)" class="groupspopup">
+		<table cellpadding="10" cellspacing="0" border="0" width="100%">
+		<tr>
+			<td>
+			<p align="center"><strong>Connections in session <?php print($rand_id); ?> of <?php print($target->getAttribute("name")); ?></em></strong></p>
+			<div align="center">
+			<table cellpadding="8" cellspacing="2" border="0" width="100%">
+			<tr>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Id</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>IP address</strong></td>
+				<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>State</strong></td>
+			</tr>
+<?php
+			$ucolor = 0;
+
+			foreach ($tconnections as $tconnection)
+			{
+				if ($ucolor == 0)
+				{
+					$ucolor = 1;
+					$uvalue = $GLOBALS["color_table_row1"];
+				}
+				else
+				{
+					$ucolor = 0;
+					$uvalue = $GLOBALS["color_table_row2"];
+				}
+
+				print("<tr>\n");
+				print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $tconnection->getAttribute("id") . "</td>\n");
+				print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\">" . $tconnection->getAttribute("ip") . "</td>\n");
+				print("\t<td valign=\"top\" bgcolor=\"" . $uvalue . "\" align=\"center\">" . $tconnection->getAttribute("state") . "</td>\n");
+				print("</tr>\n");
+			}
+?>
+			</table>
+			</div>
+			</td>
+		</tr>
+		<tr>
+			<td align="center"><a href="#" onclick="hideCurrentPopup(); return false;">Close Window</a></td>
+		</tr>
+		</table>
+		</div>
+<?php
+		}
+	}
+
+	foreach ($targets as $target)
+	{
+		print("<hr />\n");
+		print("<h4>Open sessions for iSCSI target <tt>" . $target->getAttribute("name") . "</tt></h4>\n");
+
+		print("<div align=\"center\">\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+?>
+		<tr>
+			<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Identifier</strong></td>
+			<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Initiator Name</strong></td>
+			<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Connections</strong></td>
+		</tr>
+<?php
+
+		$dcolor = 0;
+
+		$tsessions = $target->getElementsByTagName("session");
+
+		foreach ($tsessions as $tsession)
+		{
+			if ($dcolor == 0)
+			{
+				$dcolor = 1;
+				$dvalue = $GLOBALS["color_table_row1"];
+			}
+			else
+			{
+				$dcolor = 0;
+				$dvalue = $GLOBALS["color_table_row2"];
+			}
+
+			$rand_id = $tsession->getAttribute("id");
+			$tconnections = $tsession->getElementsByTagName("connection");
+
+			print("<tr>\n");
+
+			print("\t<td bgcolor=\"" . $dvalue . "\">" . $tsession->getAttribute("id") . "</td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\"><tt>" . $tsession->getAttribute("initiator") . "</tt></td>\n");
+			print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\">" . ((count($tconnections) > 0) ? "<a href=\"#\" onclick=\"return !showPopup('popup-" . $rand_id . "', event);\">View</a>" : "None") . "</td>\n");
+			print("</tr>\n");
+		}
+
+		print("</table>\n");
+		print("</div>\n");
+		print("<p>&nbsp;</p>\n");
+	}
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

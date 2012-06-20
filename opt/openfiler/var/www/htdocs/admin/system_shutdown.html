@@ -1,0 +1,93 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+	require("pre.inc");
+    include("authenticated.inc");
+
+	if ($action == "Shutdown")
+	{
+		if ((!isset($delay)) || ($delay < 0))
+			$delay = 0;
+
+		$shutdowncommand = "export LANG=C; /usr/bin/sudo /sbin/shutdown ";
+
+		if ($fsck == "on")
+			$shutdowncommand .= " -F";
+
+		if ($shutdowntype == "reboot")
+			$shutdowncommand .= " -r";
+		else
+			$shutdowncommand .= " -h";
+
+		$shutdowncommand .= " +" . $delay . " &>/dev/null &";
+
+
+		exec($shutdowncommand);
+        header('Location: /index.html');
+		exit;
+	}
+
+	generic_header(array("title" => _("System : Shutdown")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_GENERAL_SHUTDOWN");
+	print("<h3 align=\"center\">Shutdown the system</h3>\n");
+
+	print("<div align=\"center\">\n");
+	print("<form action=\"system_shutdown.html\" method=\"post\">\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\" valign=\"top\" align=\"left\"><strong>Shutdown type</strong></td>\n");
+	print("\t<td class=\"color_table_row1\" valign=\"top\" align=\"left\"><input type=\"radio\" name=\"shutdowntype\" value=\"halt\" checked=\"checked\" />&nbsp;Shutdown and halt<br />\n");
+	print("\t<input type=\"radio\" name=\"shutdowntype\" value=\"reboot\" />&nbsp;Reboot</td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\" valign=\"top\" align=\"left\"><strong>Delay before shutdown</strong></td>\n");
+	print("\t<td class=\"color_table_row2\" valign=\"top\" align=\"left\"><input type=\"text\" name=\"delay\" size=\"3\" value=\"0\" />&nbsp; minutes</td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\" colspan=\"2\" valign=\"top\" align=\"center\"><input type=\"checkbox\" name=\"fsck\" />&nbsp; Check filesystems on startup</td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td colspan=\"2\" align=\"center\"><input type=\"submit\" name=\"action\" value=\"Shutdown\" /></td>\n");
+	print("</tr>\n");
+	print("</table>\n");
+	print("</form>\n");
+	print("</div>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

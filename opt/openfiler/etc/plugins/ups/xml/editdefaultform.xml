@@ -1,0 +1,36 @@
+<formfields>
+    <field id="upsstatus" name="upsstatus" label="Status" inputtype="radio">
+        <option id="upsenabled" name="upsstatus" value="1"  label="Enabled"/>
+        <option id="upsdisabled" name="upsstatus" value="0" label="Disabled"/>    
+    </field>
+        
+	<field id="port" name="port" label="Device Port" inputtype="select">
+        <option id="ttyS0" name="ttyS0" value="ttyS0">ttyS0</option>   
+        <option id="ttyS1" name="ttyS1" value="ttyS1">ttyS1</option>
+	    <option id="ttyS2" name="ttyS2" value="ttyS2">ttyS2</option>
+	    <option id="ttyS3" name="ttyS3" value="ttyS3">ttyS3</option>
+	    <option id="ttyS4" name="ttyS4" value="ttyS4">ttyS4</option>
+	    <option id="ttyS5" name="ttyS5" value="ttyS5">ttyS5</option>
+	    <option id="ttyS6" name="ttyS6" value="ttyS6">ttyS6</option>
+	    <option id="ttyS7" name="ttyS7" value="ttyS7">ttyS7</option>
+	    <option id="ttyS8" name="ttyS8" value="ttyS8">ttyS8</option>
+	</field>
+    
+        
+    <field id="desc" name="desc" label="Description" inputtype="text"/>
+    
+    <field id="sorder" name="sorder" label="Shutdown Order" inputtype="select">
+        <option id="sorder0" name="sorder0" value="0">0</option>
+        <option id="sorder1" name="sorder1" value="1">1</option>
+        <option id="sorder2" name="sorder2" value="2">2</option>
+        <option id="sorder3" name="sorder3" value="3">3</option>
+        <option id="sorder4" name="sorder4" value="4">4</option>
+        <option id="sorder5" name="sorder5" value="5">5</option>
+        <option id="sorder6" name="sorder6" value="6">6</option>
+        <option id="sorder7" name="sorder7" value="7">7</option>
+        <option id="sorder8" name="sorder8" value="8">8</option>
+    </field>
+        
+        
+</formfields>
+

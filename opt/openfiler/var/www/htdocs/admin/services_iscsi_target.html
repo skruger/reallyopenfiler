@@ -1,0 +1,334 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+        require("pre.inc");
+        include("authenticated.inc");
+        include("ietIscsi.inc");
+
+        $targetObjs = new IetIscsi();
+
+        $outgoingUsers = $targetObjs->getGlobalConfigOutgoingUsers();
+
+        if ($outgoingUsers)
+            $outgoingUserCount = $outgoingUsers->length;
+
+
+        $globalIncomingUsers = $targetObjs->getGlobalConfigIncomingUsers();
+        $globalOutgoingUsers = $targetObjs->getGlobalConfigOutgoingUsers();
+
+        $incomingUsers = array();
+        $outgoingUsers = array();
+
+        $usersExist = FALSE;
+
+        $serverIPNode = $targetObjs->getiSNSServer();
+
+        if ($serverIPNode)
+            if ($serverIPNode->hasAttribute("server"))
+                $serverIP = $serverIPNode->getAttribute("server");
+
+        if ($globalIncomingUsers->length > 0) {
+
+            $usersExist = TRUE;
+
+            foreach($globalIncomingUsers as $globalUser) {
+                $username = $globalUser->getAttribute("username");
+                $password = $globalUser->getAttribute("password");
+                $tmpUser = array($username => $password);
+                $incomingUsers = array_merge($incomingUsers, $tmpUser );
+
+            }
+
+        }
+
+
+        if ($globalOutgoingUsers->length > 0) {
+
+            $usersExist = TRUE;
+
+            foreach($globalOutgoingUsers as $globalUser) {
+                $username = $globalUser->getAttribute("username");
+                $password = $globalUser->getAttribute("password");
+                $tmpUser = array($username => $password);
+                $outgoingUsers = array_merge($outgoingUsers, $tmpUser );
+
+            }
+
+        }
+
+        if ($action == "updateChap") {
+
+            global $targetObjs;
+
+            $usertype = $_POST['usertype'];
+            $username = $_POST['username'];
+            $oldPassword = $_POST['password'];
+            $newPassword = $_POST['newPassword'];
+            $optype = $_POST['optype'];
+
+            if (!empty($username)) {
+
+
+                if ($optype == "Delete") {
+
+                    $targetObjs->delChapSetting($username, $usertype, "globalsetting");
+
+                }
+
+                else if ($optype == "Update") {
+
+                    if (!empty($newPassword)) {
+
+                        if ($oldPassword != $newPassword) {
+
+                            $userObj;
+
+
+                            if ($usertype == "IncomingUser")
+                                $userObj = new IetIncomingUser($username, $newPassword);
+                            else
+                                $userObj = new IetOutgoingUser($username, $newPassword);
+
+
+
+                            $targetObjs->updateChapSetting($userObj, "globalsetting");
+                        }
+                    }
+                }
+            }
+
+            header ("Location: ./services_iscsi_target.html");
+            exit;
+
+        }
+
+
+        if ($_POST['addChapUser']) {
+
+
+            $usertype = $_POST['usertype'];
+            $username = $_POST['username'];
+            $password = $_POST['password'];
+
+            if (!empty($username) && !empty($password)) {
+
+                $userObj;
+
+                if ($usertype == "IncomingUser")
+                    $userObj = new IetIncomingUser($username, $password);
+                else
+                    $userObj = new IetOutgoingUser($username, $password);
+
+                $targetObjs->updateChapSetting($userObj, "globalsetting");
+
+            }
+
+            header("Location: ./services_iscsi_target.html");
+            exit;
+
+        }
+
+        if ($_POST['updateServerIP'] || $_POST['deleteServerIP']) {
+
+            $serverIP = trim($_POST['serverIP']);
+            $delete = false;
+            $restart = false;
+
+            if ($_POST['restartIetd'])
+                $restart = true;
+
+            if ($_POST['deleteServerIP'])
+                $delete = true;
+
+            if (!empty($serverIP))
+                $isValidIP = true; /* TODO: implement check for valid IP */
+
+            if ($_POST['updateServerIP']) {
+
+                if ($isValidIP)
+                    $targetObjs->updateiSNSServer($serverIP, $delete, $restart);
+            }
+
+            else if ($delete) {
+
+                if ($isValidIP)
+                    $targetObjs->updateiSNSServer($serverIP, $delete, $restart);
+            }
+
+            header("Location: ./services_iscsi_target.html");
+            exit;
+
+        }
+
+
+	generic_header(array("title" => _("Services : iSCSI Setup")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_SERVICES_ISCSI_TARGET");
+
+
+         if ($usersExist) {
+            print("<h3>Discovery CHAP Authentication Settings</h3>");
+            print("<table cellspacing=\"2\" cellpadding=\"8\">");
+?>
+            <tr><td class="color_table_heading"><strong>User Type</strong></td>
+                <td class="color_table_heading"><strong>Username</strong></td>
+                <td class="color_table_heading"><strong>Password</strong></td>
+                <td class="color_table_heading"><strong>Update</strong></td>
+                <td class="color_table_heading"><strong>Delete</strong></td>
+            </tr>
+<?php
+
+
+
+            $dcolor = 0;
+            foreach ($incomingUsers as $username => $password) {
+
+                if ($dcolor == 0) {
+                    $dcolor = 1;
+                    $dvalue = $GLOBALS["color_table_row1"];
+                }
+                else {
+                    $dcolor = 0;
+                    $dvalue = $GLOBALS["color_table_row2"];
+                }
+
+                print("<form name=\"updateChap\" action=\"services_iscsi_target.html\" method=\"post\">");
+                print("<input type=\"hidden\" name=\"username\" value=\"$username\"/>");
+                print("<input type=\"hidden\" name=\"password\" value=\"$password\"/>");
+                print("<input type=\"hidden\" name=\"action\" value=\"updateChap\"/>");
+                print("<input type=\"hidden\" name=\"usertype\" value=\"IncomingUser\"/>");
+                print("<tr bgcolor=\"$dvalue\"><td><strong>Incoming User</strong></td><td>$username</td><td><input type=\"text\"
+                        value=\"$password\" name=\"newPassword\"/></td><td><input type=\"submit\" name=\"optype\" value=\"Update\"/></td><td><input
+                        type=\"submit\" name=\"optype\" value=\"Delete\"/></td></tr>");
+                print("</form>");
+
+
+            }
+
+            foreach ($outgoingUsers as $username => $password) {
+
+                if ($dcolor == 0) {
+                    $dcolor = 1;
+                    $dvalue = $GLOBALS["color_table_row1"];
+                }
+                else {
+                    $dcolor = 0;
+                    $dvalue = $GLOBALS["color_table_row2"];
+                }
+
+                print("<form name=\"updateChap\" action=\"services_iscsi_target.html\" method=\"post\">");
+                print("<input type=\"hidden\" name=\"username\" value=\"$username\"/>");
+                print("<input type=\"hidden\" name=\"password\" value=\"$password\"/>");
+                print("<input type=\"hidden\" name=\"action\" value=\"updateChap\"/>");
+                print("<input type=\"hidden\" name=\"usertype\" value=\"OutgoingUser\"/>");
+                print("<tr bgcolor=\"$dvalue\"><td><strong>Outgoing User</strong></td><td>$username</td><td><input type=\"text\"
+                        value=\"$password\" name=\"newPassword\"/></td><td><input type=\"submit\" name=\"optype\" value=\"Update\"/></td><td><input
+                        type=\"submit\" name=\"optype\" value=\"Delete\"/></td></tr>");
+                print("</form>");
+
+
+            }
+
+
+
+            print("</table>");
+
+
+
+
+        }
+
+        else {
+
+            printMessageBlock("warning", "<p>No discovery CHAP users assigned.</p>");
+
+        }
+
+
+        print("<p>&nbsp;</p>");
+        print("<h3>Add Discovery CHAP user</h3>");
+?>
+            <table cellspacing="2" cellpadding="8" border="0">
+                <tr class="color_table_heading">
+                    <td><strong>Username</strong></td>
+                    <td><strong>Password</strong></td>
+                    <td><strong>User Type</strong></td>
+                    <td><strong>Add</strong></td>
+                </tr>
+
+<?php
+            $dvalue = $GLOBALS["color_table_row1"];
+            print("<form name=\"addChap\" action=\"services_iscsi_target.html\" method=\"post\">");
+            print("<tr bgcolor=\"$dvalue\"><td><input type=\"text\" name=\"username\"/></td>");
+            print("<td><input type=\"text\" name=\"password\"/></td>");
+            print("<td><select name=\"usertype\">");
+            print("<option value=\"IncomingUser\">Incoming User</option>");
+            if ($outgoingUserCount == 0)
+                print("<option value=\"OutgoingUser\">Outgoing User</option>");
+            print("</select></td>");
+            print("<td><input type=\"submit\"  name=\"addChapUser\" value=\"Add\"/></td></tr>");
+            print("</form>");
+            print("</table>");
+
+?>
+
+            <hr/>
+            <h3>iSNS Server</h3>
+            <table cellspacing="2" cellpadding="8">
+                <tr class="color_table_heading">
+                    <td align="center"><strong>Restart Target<br/>Daemon</strong></td><td align="center"><strong>iSNS Server IP</strong></td>
+                    <td align="center"><strong>Update</strong></td><td align="center"><strong>Delete</strong></td>
+                </tr>
+                <form name="isnsServer" action="services_iscsi_target.html" method="post">
+                <?php
+
+                    print("<tr bgcolor=\"$dvalue\"><td align=\"center\"><input type=\"checkbox\" name=\"restartIetd\"/>");
+                    print("<td align=\"center\"><input type=\"text\" size=\"20\" name=\"serverIP\" value=\"$serverIP\"/>");
+                    print("<td align=\"center\"><input type=\"submit\" name=\"updateServerIP\" value=\"Update\"/></td>");
+                    print("<td align=\"center\"><input type=\"submit\" name=\"deleteServerIP\" value=\"Delete\"/></td></tr>");
+
+                ?>
+
+                </form>
+            </table>
+
+<?php
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

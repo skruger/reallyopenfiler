@@ -1,0 +1,461 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+
+
+
+/*
+ * Quota: Guest quota
+ *
+ *
+ */
+	require("pre.inc");
+        include("authenticated.inc");
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+	$volumes_fstype = array();
+
+	function volumes_startelement($parser, $name, $attrs)
+	{
+		global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg, $volumes_fstype;
+
+		if ($name == "VOLUME")
+		{
+			array_push($volumes_id, $attrs["ID"]);
+			array_push($volumes_name, $attrs["NAME"]);
+			array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+			array_push($volumes_vg, $attrs["VG"]);
+			array_push($volumes_fstype, $attrs["FSTYPE"]);
+		}
+	}
+
+	function volumes_endelement($parser, $name)
+	{
+	}
+
+	$volumes_parser = xml_parser_create();
+	xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+	$volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+	while ($volumes_data = fread($volumes_fp, 4096))
+		xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+	fclose($volumes_fp);
+	xml_parser_free($volumes_parser);
+
+	if (count($volumes_name) <= 0)
+	{
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+	if (strlen($volume) <= 0)
+	{
+		for ($i = 0; $i < count($volumes_id); $i++)
+		{
+			if ($volumes_fstype[$i] != "iscsi")
+			{
+				$volume = $volumes_id[$i];
+				$volume_vg = $volumes_vg[$i];
+				break;
+			}
+		}
+
+		if ($i == count($volumes_id))
+		{
+			header("Location: ./volumes.html");
+			exit;
+		}
+	}
+
+
+
+	if (isset($volumeinfo))
+	{
+		for ($i = 0; $i < count($volumes_name); $i++)
+			if ($volumeinfo == ("#!@-" . $volumes_id[$i] . "-#!@-" . $volumes_vg[$i] . "-#!@"))
+			{
+				$volume_mountpoint = $volumes_mountpoint[$i];
+				$volume_name = $volumes_name[$i];
+				$volume = $volumes_id[$i];
+				$volume_vg = $volumes_vg[$i];
+				$volume_fstype = $volumes_fstype[$i];
+				break;
+			}
+	}
+	else
+	{
+		for ($i = 0; $i < count($volumes_name); $i++)
+			if (($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg))
+			{
+				$volume_mountpoint = $volumes_mountpoint[$i];
+				$volume_name = $volumes_name[$i];
+				$volume_fstype = $volumes_fstype[$i];
+				break;
+			}
+	}
+
+	$fstype = $volume_fstype;
+
+	$fs = 0;
+	$fsfound = false;
+
+	for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+	{
+		if ($fs_info[$fsi]["type"] == $fstype)
+		{
+			$fs = $fsi;
+			$fsfound = true;
+			break;
+		}
+	}
+
+	if ($fsfound == false)
+		$fs = 0;
+
+
+	if ($volume_fstype == "iscsi")
+	{
+		header("Location: ./quota_guest.html");
+		exit;
+	}
+
+	$quota = array();
+	$quotap = popen("export LANG=C; /usr/bin/sudo /usr/sbin/repquota -v -g -n " . escapeshellarg($volume_mountpoint), "r");
+
+	// at this point we know the volume mountpoint, so let's figure out its size and pass that to the sliders
+
+
+
+	while (!feof($quotap))
+	{
+		$string = trim(fgets($quotap, 4096));
+		$strarray = explode(" ", $string);
+		$qarray = array();
+
+		foreach ($strarray as $strelement)
+		{
+			$element = trim($strelement);
+			if (strlen($element) == 0)
+				continue;
+			else
+				array_push($qarray, $element);
+		}
+
+		array_push($quota, $qarray);
+	}
+
+	pclose($quotap);
+
+        $currentVol = new fs_utility(escapeshellarg($volume_mountpoint));
+        $currentFSMax = $currentVol->get_dfcommand_fssize();
+		$currentInodeMax = $currentVol->get_dfcommand_inodes();
+
+
+
+
+
+
+	generic_header(array("title" => _("Quota : Guest"), "ajax" => $ajax));
+	single_begin(array());
+
+
+
+?>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_QUOTA_GUEST");
+?>
+	<h3 align="center">Select Volume</h3>
+	<?php printMessageBlock("info", "<p>Select a volume below to bring up group quota for that particular
+	volume in the list below.</p>"); ?>
+	<form action="quota_guest.html" method="get">
+	<p align="center">
+	<select name="volumeinfo">
+<?php
+	for ($i = 0; $i < count($volumes_name); $i++)
+		if ($volumes_fstype[$i] != "iscsi")
+			print("\t\t<option" . ((($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg)) ? " selected=\"selected\"" : "") . " value=\"" . htmlentities("#!@-" . $volumes_id[$i] . "-#!@-" . $volumes_vg[$i] . "-#!@") . "\">" . htmlentities($volumes_name[$i]) . " (group:" . htmlentities($volumes_vg[$i]) . " / volume:" . htmlentities($volumes_id[$i]) . ")</option>\n");
+?>
+	</select>&nbsp;<input type="submit" value="Change" />
+	</p>
+	</form>
+
+	<p>&nbsp;</p>
+
+	<hr />
+
+
+
+
+
+<?php
+	print("<form name=\"groupquotaform\" method=\"post\" action=\"quota_guest.html\">\n");
+	print("<input type=\"hidden\" name=\"volume\" value=\"" . $volume . "\" />\n");
+	print("<input type=\"hidden\" name=\"volume_vg\" value=\"" . $volume_vg . "\" />\n");
+	print("<input type=\"hidden\" name=\"savedfsblocksize\" id=\"savedfsblocksize\" value=\"" . $fs_info[$fs]["fs_block_size"] . "\"/>\n");
+	print("<input type=\"hidden\" name=\"savedvolumemountpoint\" id=\"savedvolumemountpoint\" value=\"" . $volume_mountpoint . "\"/>\n");
+?>
+
+	<h3 align="center">Edit guest account's quota</h3>
+
+<?php
+	if ($fstype == "jfs")
+		print("<div class=\"warning\">This filesystem does not support quota configuration. Settings will not be applied.</div>\n");
+	else if ($fstype == "reiserfs")
+		print("<div class=\"warning\">This filesystem does not support file limits. Please apply capacity limits.</div>\n");
+?>
+
+	<p align="center">Click on <em>Apply</em> after entering new quota values to change a group's quota<br />
+	for the <em><?php print($volume_name); ?></em> volume.</p>
+<?php
+		for ($j = 0; $j < count($quota); $j++)
+		{
+			$qline = $quota[$j];
+			if ($qline[0] == "#96")
+				break;
+			$qline = array();
+		}
+
+	 print("<input type=\"hidden\" name=\"gival96\" id=\"gival96\" value=\"" . (intval($qline[7]) - intval($qline[6]))  . "\"/>\n");
+	print("<input type=\"hidden\" name=\"gbval96\" id=\"gbval96\" value=\"" . intval(round(((intval($qline[3]) - intval($qline[2])) / $fs_info[$fs]["fs_block_size"])))  . "\"/>\n");
+?>
+
+
+
+
+
+
+	<div align="center">
+	<table cellpadding="8" cellspacing="2" border="0">
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Limit (MB)</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Used (MB)</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Free (MB)</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Total Files</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Used Files</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Free Files</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Apply</strong></td>
+	    <td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Reset</strong></td>
+
+	</tr>
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="text" name="gblocks96" id="gblocks96" style="text-align: right;" size="10" value="<?php print(intval($qline[3]) / $fs_info[$fs]["fs_block_size"]); ?>" onchange="s.setValue(parseInt(this.value)); enableButtons();" /><div class="slider" id="slider-1"><input class="slider-input" id="slider-input-1"/></div></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><?php printf("%.00f", intval($qline[2]) / $fs_info[$fs]["fs_block_size"]); ?></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center" id="gblocksvaltd96"><div id="gblocksval96"> <?php print(((intval($qline[3]) > 0) ? printf("%.00f", (intval($qline[3]) - intval($qline[2])) / $fs_info[$fs]["fs_block_size"]) : "0")); ?></div></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="text" name="ginodes96" id="ginodes96" style="text-align: right;" size="10" value="<?php print(intval($qline[7])); ?>" onchange="s2.setValue(parseInt(this.value))"/><div class="slider" id="slider-2"><input class="slider-input" id="slider-input-2"/></div></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><?php print(intval($qline[6])); ?></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center" id="ginodesvaltd96"><div id="ginodes96val"> <?php print(((intval($qline[7]) > 0) ? (intval($qline[7]) - intval($qline[6])) : "0")); ?></div></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="submit" title="Save selected group's quota changes" name="request96" id="request96" value="Apply" size="10" onclick="if (!isNumeric(document.getElementById('gblocks96').value) || !isNumeric(document.getElementById('ginodes96').value)) enterValidNumber(); else runSetQuota(96); return false;" /></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="button" title="Reset slider values" name="reset96" id="reset96" value="Reset" size="10" onclick="resetSliders();" /></td>
+	</tr>
+	</table>
+	</div>
+
+	<p>&nbsp;</p>
+
+<?php
+
+	print("</form>\n");
+	?>
+
+                <script language="JavaScript" type="text/javascript">
+                /* <![CDATA[ */
+
+
+
+var s = new Slider(document.getElementById("slider-1"), document.getElementById("slider-input-1"));
+
+
+s.onchange = function () {
+		s.setMinimum(parseInt(0));
+		s.setMaximum(parseInt(<?php print("" . intval($currentFSMax)) ?>));
+                document.getElementById("gblocks96").value = s.getValue();
+		s.setBlockIncrement(parseInt(5));
+		if (document.groupquotaform.request96.disabled == true){
+			document.groupquotaform.request96.disabled=false;
+		}
+		if (document.groupquotaform.reset96.disabled == true ){
+			document.groupquotaform.reset96.disabled=false;
+		}
+};
+
+
+
+var s2 = new Slider(document.getElementById("slider-2"), document.getElementById("slider-input-2"));
+
+
+s2.onchange = function () {
+                s2.setMinimum(parseInt(0));
+                s2.setMaximum(parseInt(<?php print("" . intval($currentInodeMax)) ?>));
+                document.getElementById("ginodes96").value = s2.getValue();
+                s2.setBlockIncrement(parseInt(5));
+		if (document.groupquotaform.request96.disabled == true){
+			document.groupquotaform.request96.disabled=false;
+		}
+		 if (document.groupquotaform.reset96.disabled == true){
+                        document.groupquotaform.reset96.disabled=false;
+                }
+
+};
+
+function onloadQuotaGuest()  {
+ 	s.setMinimum(parseInt(0));
+        s.setMaximum(parseInt(<?php print("" . intval($currentFSMax)) ?>));
+        s.setValue(parseInt(<?php print(intval($qline[3]) / $fs_info[$fs]["fs_block_size"]); ?>));
+
+
+
+        s2.setMinimum(parseInt(0));
+        s2.setMaximum(parseInt(<?php print("" . intval($currentInodeMax)) ?>));
+        s2.setValue(parseInt(<?php print(intval($qline[7])); ?>));
+	document.groupquotaform.request96.disabled=true;
+	document.groupquotaform.reset96.disabled=true;
+};
+
+window.onresize = function () {
+        s.recalculate();
+	s2.recalculate();
+
+};
+
+
+resetSliders = function (){
+
+	s.setValue(parseInt(document.getElementById("gbval96").value));
+	s2.setValue(parseInt(document.getElementById("gival96").value));
+	disableButtons();
+
+};
+
+disableButtons = function(){
+
+	document.groupquotaform.request96.disabled=true;
+	document.groupquotaform.reset96.disabled=true;
+
+};
+
+enableButtons = function(){
+
+	document.groupquotaform.request96.enabled=false;
+	document.groupquotaform.reset96.disabled=false;
+
+};
+
+
+function replaceNode(nodeName){
+
+		var progress = document.createElement('img');
+		progress.src = '/images/progress.gif';
+		nodeName.appendChild(progress);
+
+}
+
+function runSetQuota(gid)
+{
+
+	var gblocks = "gblocks" + gid;
+	var ginodes = "ginodes" + gid;
+	var gbval = "gbval" + gid;
+	var gival = "gival" + gid;
+	var gblocksvaltd = "gblocksvaltd" + gid;
+	var ginodesvaltd = "ginodesvaltd" + gid;
+	var request = "request" + gid;
+	var reset = "reset" + gid;
+
+
+	if (parseInt(document.getElementById(gblocks).value) != parseInt(document.getElementById(gbval).value))
+		replaceNode(document.getElementById(gblocksvaltd));
+	if (parseInt(document.getElementById(ginodes).value) != parseInt(document.getElementById(gival).value))
+		replaceNode(document.getElementById(ginodesvaltd));
+
+	disableButtons(document.getElementById(request), document.getElementById(reset));
+
+	tinker_setQuotaGuest(
+			document.getElementById(gblocks).value,
+			document.getElementById(ginodes).value,
+			document.getElementById('savedfsblocksize').value,
+			document.getElementById('savedvolumemountpoint').value,
+			document.getElementById(gbval).value,
+			document.getElementById(gival).value,
+			gid
+			);
+
+}
+
+
+
+
+function isNumeric(sText)
+
+{
+   var ValidChars = "0123456789";
+   var IsNumber=true;
+   var Char;
+
+
+   for (i = 0; i < sText.length && IsNumber == true; i++)
+      {
+      Char = sText.charAt(i);
+      if (ValidChars.indexOf(Char) == -1)
+         {
+         IsNumber = false;
+         }
+      }
+   return IsNumber;
+
+   }
+
+
+
+function enterValidNumber(){
+
+        alert("Please Enter a Valid Number");
+
+}
+
+/* ]]> */
+
+</script>
+
+<?php
+
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+
+?>

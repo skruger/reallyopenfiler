@@ -1,0 +1,80 @@
+<?php
+
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2008 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ * 
+ * --------------------------------------------------------------------
+ *
+ *  
+ */
+
+	require("pre.inc");
+
+//
+// Authenticate the person here. If the information supplied is invalid,
+// show a page indicating that the information supplied was invalid. If
+// the information supplied was valid, send a cookie back to the browser
+// with a hash of the password. The cookie expires when the browser is
+// closed or the user logs out, and the session is secure over HTTPS.
+//
+
+if (!check_authenticated($username, $password))
+{
+        /*
+	generic_header(array("title" => "Invalid username/password"));
+	dual_begin(array());
+
+	print("<h2>" . _("Invalid username/password") . "</h2>\n");
+
+	print("<p><span class=\"red\">" . _("Your username and/or password are not valid.") . "</span>\n" .
+		_("Please supply correct credentials to authenticate yourself to the system. You can use the form on the right hand side to login.") . "</p>\n");
+
+	dual_middle(array());
+	show_account_details(array());
+	dual_end(array());
+	generic_footer(array());
+        */
+        
+        $redirect = "/index.html?redirect=/index.html";
+        header("Location: $redirect");
+        exit;
+}
+else
+{
+//	setcookie("passcookie", makehash($password), time() + 1800, "/");
+	if (strcmp($username, "openfiler") == 0) {
+            if(isset($_POST['redirect'])) {
+                $url = $_POST['redirect'];
+                header("Location: $url");
+            }
+            else
+        	header("Location: ../admin/status.html");
+        }
+	else
+		header("Location: ./");
+
+}
+
+?>

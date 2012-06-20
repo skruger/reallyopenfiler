@@ -1,0 +1,1282 @@
+<?php
+
+/*
+ * Openfiler CSS stylesheet
+ *
+ * Copyright (C) 2001 - 2008 Openfiler. All rights reserved.
+ *
+ */
+	require("pre.inc");
+	header("Content-type: text/css");
+	check_browser(array("css" => 1));
+?>
+
+body
+{
+	margin: 0px;
+	padding: 0px;
+	border: 0px;
+
+	color: rgb(64, 64, 64);
+	background-color: <?php print($GLOBALS["color_outer_body"]); ?>;
+
+	
+	font-family: "Verdana", "Bitstream Vera Sans", sans-serif;
+	font-size: 8pt;
+}
+
+input, textarea, select, p, div, li, td
+{
+	font-family: "Verdana", "Bitstream Vera Sans", sans-serif;
+	font-size: 8pt;
+	line-height: 120%;
+}
+
+code, pre, tt
+{
+	font-family: monospace;
+	font-size: 8pt;
+}
+
+button
+{
+	font-family: "Verdana", "Bitstream Vera Sans", sans-serif;
+}
+
+
+hr {
+
+	border: 0;
+	color: #ccc;
+	background-color: #ccc;
+	height: 2px; 
+	
+}
+
+
+a { text-decoration: underline; color: rgb(51, 102, 204); background-color: transparent; }
+a:visited { text-decoration: underline; color: rgb(51, 102, 204); background-color: transparent; }
+a:active { text-decoration: underline; color: rgb(51, 102, 204); background-color: transparent; }
+a:hover { text-decoration: none; color: rgb(204, 102, 51); background-color: transparent; }
+
+a.tablink1 { display: block; text-decoration: underline; color: <?php print($GLOBALS["color_tab1_regular"]); ?>; background-color: transparent; }
+a.tablink1:visited { display: block; text-decoration: underline; color: <?php print($GLOBALS["color_tab1_regular"]); ?>; background-color: transparent; }
+a.tablink1:active { display: block; text-decoration: underline; color: <?php print($GLOBALS["color_tab1_regular"]); ?>; background-color: transparent; }
+a.tablink1:hover { display: block; text-decoration: none; color: <?php print($GLOBALS["color_tab1_regular"]); ?>; background-color: transparent; }
+
+a.tablink2 { display: block; text-decoration: underline; color: <?php print($GLOBALS["color_tab2_regular"]); ?>; background-color: transparent; }
+a.tablink2:visited { display: block; text-decoration: underline; color: <?php print($GLOBALS["color_tab2_regular"]); ?>; background-color: transparent; }
+a.tablink2:active { display: block; text-decoration: underline; color: <?php print($GLOBALS["color_tab2_regular"]); ?>; background-color: transparent; }
+a.tablink2:hover { display: block; text-decoration: none; color: <?php print($GLOBALS["color_tab2_regular"]); ?>; background-color: transparent; }
+
+a.tableheading { text-decoration: underline; color: <?php print($GLOBALS["color_table_heading_text"]); ?>; background-color: transparent; }
+a.tableheading:visited { text-decoration: underline; color: <?php print($GLOBALS["color_table_heading_text"]); ?>; background-color: transparent; }
+a.tableheading:active { text-decoration: underline; color: <?php print($GLOBALS["color_table_heading_text"]); ?>; background-color: transparent; }
+a.tableheading:hover { text-decoration: none; color: <?php print($GLOBALS["color_table_heading_text"]); ?>; background-color: transparent; }
+
+a.image { border: 0px; }
+a.image:visited { border: 0px; }
+a.image:active { border: 0px; }
+a.image:hover { border: 0px; }
+
+a.other { text-decoration: none; color: rgb(64, 64, 64); background-color: transparent; }
+a.other:visited { text-decoration: none; color: rgb(64, 64, 64); background-color: transparent; }
+a.other:active { text-decoration: none; color: rgb(64, 64, 64); background-color: transparent; }
+a.other:hover { text-decoration: none; color: rgb(64, 64, 64); background-color: transparent; }
+
+img
+{
+	border: 0px;
+	padding: 0px;
+	margin: 0px;
+}
+
+img.thumbnail
+{
+	border: 1px solid black;
+}
+
+li
+{
+	padding-top: 0.25em;
+	padding-bottom: 0.25em;
+}
+
+sup
+{
+	color: #cc6633;
+	background-color: transparent;
+}
+
+acronym
+{
+        border-bottom: 1px solid black;
+}
+
+h2 {
+	font-weight: bold;
+	text-decoration: none;
+	font-size: 18px;
+	font-family: Verdana; 
+}
+
+h3 {
+	font-weight: bold;
+	text-decoration: none;
+	font-size: 16px;
+	display: block;
+	background: rgb(240, 240, 240);
+	padding: 10px;
+	margin-left: 15px;
+	margin-right: 15px; 
+}
+
+<?php
+	if ($msie)
+	{
+?>
+
+.paddeddata
+{
+	padding-left: 2em;
+	padding-right: 2em;
+	padding-top: 1em;
+	padding-bottom: 0em;
+}
+
+<?php
+	}
+	else
+	{
+?>
+
+.paddeddata
+{
+	padding-left: 2em;
+	padding-right: 2em;
+	padding-top: 0em;
+	padding-bottom: 0em;
+}
+
+<?php
+	}
+?>
+
+span.red
+{
+	color: red;
+	background-color: transparent;
+}
+
+div.container table {
+	text-align: left;
+}
+
+div.openfiler-logo
+{
+	margin: 0px;
+	padding: 0px;
+	border: 0px;
+	height: 44px;
+	background-color: rgb(76,85,90);
+	background-image: url(/images/of3.png);
+	background-position: left;
+	background-repeat: no-repeat;
+	position: relative;
+	z-index: 20;
+	border-bottom: 2px solid rgb(160,160,160);
+	
+}
+
+
+
+div#globalButtons {
+
+    width:230px; 
+    float: right;
+    margin-right: 30px;
+    margin-left: auto;
+    padding-left: 0px;
+    padding-top: 10px; 
+    height: 25px;
+    margin-top: 5px;
+
+
+
+}
+
+
+div#globalButtons ul {
+
+    padding: 0;
+    margin: 0;
+    list-style: none;
+    list-style-position: outside;
+    float: right;
+   
+
+}
+
+div#globalButtons li {
+
+    padding-right: 5px;
+    float: left;
+    display: block;
+    border-left: 1px solid #a0a0a0;
+    padding-left: 5px;
+    padding-top: 0;
+    padding-bottom: 0;
+    
+}
+
+div#globalButtons li:first-child {
+    
+    border-left: none;     
+}
+
+#globalButtons a {
+    
+    color: #ff7900; /*#f7c52f;*/
+    font-size: smaller;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+#globalButtons a:hover {
+    
+    color: white;
+    
+}
+
+
+div#loginHeader {
+	
+    width: 400px;
+    height: 44px;
+    margin-top: 75px;
+    margin-left: auto;
+    margin-right: auto;
+    background: url(/images/of3.png) #4c555a left no-repeat;
+    padding: 0 20px 0 20px;
+    border-left: 2px solid #a0a0a0;
+    border-right: 2px solid #a0a0a0;
+    border-top: 2px solid #a0a0a0;
+	
+}
+
+img.loginHeader {
+
+    margin-top: 10px;
+    margin-bottom: auto;
+    float: right;    
+
+}
+
+div#loginDiv {
+    
+    width: 400px;
+    min-height: 180px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    margin-left: auto;
+    margin-right: auto;
+    border: 2px solid #a0a0a0;
+    padding: 10px 20px 10px 20px;
+    background: url(/images/login_bottom.png) right bottom no-repeat white;
+
+}
+
+
+div.shares-listitem
+{
+	padding-left: 24px;
+}
+
+div.sharespopup
+{
+	margin: 1em;
+	padding-top: 20px; 
+	position: absolute;
+	top: auto;
+	left: 20%;
+    padding-top: 20px;
+    padding-bottom: 10px; 
+
+	position: absolute;
+	visibility: hidden;
+	width: 35em;
+
+	border: 4px solid black;
+
+	color: black;
+	background-color: <?php print($GLOBALS["color_popup_background"]); ?>;
+	
+	z-index: 10;
+}
+
+div.scrolled-groups
+{
+	overflow: auto;
+	height: 24em;
+	width: 60em;
+}
+
+div.scrolled-networks
+{
+	overflow: auto;
+	height: 18em;
+}
+
+div.userspopup
+{
+	margin: 1em;
+	
+	position: absolute;
+	visibility: hidden;
+	width: 35em;
+
+	border: 4px solid black;
+    padding-top: 20px; 
+	color: black;
+	background-color: <?php print($GLOBALS["color_popup_background"]); ?>;
+	
+	z-index: 10;
+}
+
+div.groupspopup
+{
+	margin: 1em;
+	
+	position: absolute;
+	visibility: hidden;
+	display: none;
+
+	overflow: auto;
+	height: 24em;
+	width: 45em;
+
+	border: 4px solid black;
+    padding-top: 20px; 
+
+	color: black;
+	background-color: <?php print($GLOBALS["color_popup_background"]); ?>;
+	
+	z-index: 10;
+}
+
+div.partitionspopup
+{
+	margin: 1em; 
+	
+	position: absolute;
+	visibility: hidden;
+	display: none;
+
+	overflow: auto;
+	height: 24em;
+	width: 55em;
+	margin-top: 20px; 
+
+	border: 4px solid black;
+    padding-top: 20px; 
+	color: black;
+	background-color: <?php print($GLOBALS["color_popup_background"]); ?>;
+	
+	z-index: 10;
+}
+
+div.pvspopup
+{
+	margin: 1em;
+
+	position: absolute;
+	visibility: hidden;
+
+	overflow: auto;
+	height: 24em;
+	width: 20em;
+
+	border: 4px solid black;
+    padding-top: 20px; 
+	color: black;
+	background-color: <?php print($GLOBALS["color_popup_background"]); ?>;
+	padding-top: 20px; 
+	z-index: 10;
+}
+
+div.mdspopup
+{
+	margin: 1em;
+	
+	position: absolute;
+	visibility: hidden;
+
+	overflow: auto;
+	height: 24em;
+	width: 60em;
+
+	border: 4px solid black;
+    padding-top: 20px; 
+
+	color: black;
+	background-color: <?php print($GLOBALS["color_popup_background"]); ?>;
+	
+	z-index: 10;
+}
+
+td.color_table_row1
+{
+	background-color: <?php print($GLOBALS["color_table_row1"]); ?>;
+}
+
+
+tr.color_table_row1
+{
+	background-color: <?php print($GLOBALS["color_table_row1"]); ?>;
+
+}
+
+td.color_table_row2
+{
+	background-color: <?php print($GLOBALS["color_table_row2"]); ?>;
+}
+
+tr.color_table_row2
+{
+	background-color: <?php print($GLOBALS["color_table_row2"]); ?>;
+}
+
+td.color_table_heading
+{
+
+	background-color: <?php print($GLOBALS["color_table_heading"]); ?>;
+	font-weight: bold;	
+}
+
+tr.color_table_heading
+{
+
+	background-color: <?php print($GLOBALS["color_table_heading"]); ?>;
+	font-weight: bold;	
+}
+
+td.color_table_alert {
+	
+	background-color: <?php print($GLOBALS["color_table_alert"]); ?>;
+	font-weight: bold;	
+}
+
+#slidingpaneldiv.hide h2 {
+	display: none;
+}
+
+#panelinfo h3 {
+	margin: 0 0 10px 25px;
+	padding: 16px 0 0 0;
+	background: rgb(255,255,255);
+	display: inline; 
+}
+
+#slidingpaneldiv.hide hr {
+	display: none;
+}
+
+#slidingpaneldiv.hide p {
+	display: none;
+}
+
+#slidingpaneldiv p {
+	margin: 0 0 10px 0;
+	padding: 0;
+}
+
+#panelinfo p {
+	margin: 0 25px 10px 25px;
+}
+
+#slidingpaneldiv.hide table {
+	border: 0;
+	padding: 0 6px 6px 6px;
+	position: relative;
+	vertical-align: bottom;
+	width: 498px;
+	margin: 0 17px 0 15px;
+}
+
+#slidingpaneldiv.show table {
+	border-style: solid;
+	border-width: 1px;
+	empty-cells: show;
+	font-size: 90%;
+	margin: 0 0 20px 0;
+	padding: 4px;
+	text-align: left;
+	width: 210px;
+}
+
+#slidingpaneldiv.hide table caption {
+	margin: 0 6px 1px 6px;
+	padding: 16px 0 3px 0;
+	width: 486px;
+}
+
+#slidingpaneldiv.show table caption {
+	margin: 0 0 5px 0;
+	padding: 0;
+	text-align: left;
+	text-transform: uppercase;
+	width: 210px;
+}
+
+#slidingpaneldiv.hide table thead th {
+	padding: 0 0 3px 6px;
+	text-align: left;
+}
+
+#slidingpaneldiv.show table thead th {
+	border-bottom-style: solid;
+	border-bottom-width: 1px;
+	font-size: 85%;
+	padding: 3px 0;
+	margin: 0 0 5px 0;
+	text-align: left;
+	vertical-align: top;
+}
+
+#slidingpaneldiv.hide table tbody td {
+	padding: 2px 6px;
+}
+
+#slidingpaneldiv.hide table tbody tr:first-child td {
+	border-top-width: 1px;
+	border-top-style: solid;
+}
+
+#slidingpaneldiv.hide table tbody tr:last-child td {
+	border-bottom-style: solid;
+	border-bottom-width: 1px;
+	padding-bottom: 3px;
+}
+
+#slidingpaneldiv.show table tbody td {
+	padding: 2px;
+}
+
+#panelinfo ul {
+	margin: 0 25px 5px 25px;
+	padding-left: 18px;
+}
+
+#panelinfo ul li {
+	margin-left: 0;
+}
+
+#panelinfo ul li:hover {
+	cursor: pointer;
+}
+
+#panelinfo {
+	background-position: center bottom;
+	background-repeat: no-repeat;
+	height: auto;
+	left: 170px;
+	overflow: visible;
+	padding: 0px 0px 7px 0px; 
+	position: absolute;
+	top: -5000px;
+	width: 500px;
+	z-index: 17;
+
+}
+
+
+
+
+#panelinfo div.border {
+	background-position: center top;
+	background-repeat: repeat-y;
+	width: 500px;
+	padding: 0px 0px 0px 0px;
+}
+
+
+
+
+#panelinfo div.border {
+	background-image: url('/images/panel-bg-noshadow.png');
+}
+
+#slideDownDiv {
+	float: right;
+	font: normal 80%/130% "Lucida Grande", "Trebuchet MS", Verdana, Arial, sans-serif;
+	padding: 0px 0 2px 0;
+	width: 210px;
+}
+
+#slidercontainer {
+	background-position: 0px;
+	background-repeat: repeat-y;
+	margin: 0px auto 0px auto;
+	
+	position: relative;
+	width: 820px;
+	z-index: 10;
+}
+
+#panelinfo {
+	background-image: url('/images/panel-btm-bg-noshadow.png');
+}
+
+#addupseditformdiv{
+    margin-left: 35px;
+
+}
+
+#upsconfigformform{
+    margin-left: 35px;
+
+}
+
+.Curtain{
+  width:100%;
+  height:100%;
+  position:absolute;
+  top:0px;
+  left:0px;
+  position:absolute;
+  background-color: #9cf;
+  /*filter:alpha(opacity=35);*/ /*commented out to be ignored by firefox*/
+  -moz-opacity:0.35;
+  opacity: 0.35;
+  z-index: 1;
+}
+
+#configdiv{
+
+  clear:both;
+  
+  font-size:1.5em;
+  /*float:center;*/
+  border: 3px solid #000;
+  margin-right:10px;
+  margin-bottom:10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  padding-bottom: 10px; 
+  width:500px;
+
+ /* background: url("/images/configdivback.jpg") no-repeat;*/
+}
+
+div.genericSlideDownshow {
+
+  font-size:1.5em;
+  /*float:center;*/
+  border: 1px solid red;
+  margin-right:10px;
+  margin-bottom:10px;
+  width:500px;
+  height:300px;
+  background: white;
+}
+
+div.auth_config_head {
+
+    background: #ebebeb;
+    padding-left: 10px;
+    padding-right: 10px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+    width: 500px;
+    font-weight: bold;
+    text-align: left;
+
+}
+
+div.auth_config_body {
+
+
+    background: rgb(255, 255, 255);
+    padding-left: 10px;
+    padding-right: 10px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    width: 500px;
+   
+
+}
+
+textarea, input[type="text"], input[type="password"], select
+{
+        border: 1px solid rgb(149, 149, 149);
+        padding: 4px;
+}
+
+textarea:focus, input[type="text"]:focus, input[type="password"]:focus, select:focus
+{
+        border: 2px solid rgb(149, 149, 149);
+        padding: 3px;
+        background-color: #FCFFCD;
+}
+
+
+textarea:hover, input[type="text"]:hover, input[type="password"]:focus, select:hover
+{
+        border: 2px solid rgb(149, 149, 149);
+        padding: 3px;
+}
+
+
+input[readonly="readonly"]
+{
+        background: #e2e2e2;         
+}
+
+
+textarea
+{
+        border: 1px solid rgb(149, 149, 149);
+        padding: 4px;
+}
+
+div.warning
+{
+        border: 2px solid red;
+        padding: 2px;
+        margin: 2px;
+        font-size: 10pt;
+        color: white;
+        font-weight: bold;
+        background: rgb(205, 117, 117);
+}
+
+div.sysinfo H1 {
+  font-size: 20px;
+}
+
+div.sysinfo {
+
+	width: 99%; 
+}
+
+div.sysinfo div.table {
+  border: none;
+  margin: 0px;
+  padding: 0px;
+}
+
+div.sysinfo table.box {
+  color: #fefefe;
+  background-color: #4c555a;
+  border: none;
+  padding: 1px;
+  width: 100%;
+}
+
+div.sysinfo tr.boxheader {
+
+  background-color: #5b6469;
+}
+
+div.sysinfo td.boxheader {
+  text-align: center;
+  font-weight: bold;
+  padding-top: 5px;
+  padding-bottom: 5px; 
+}
+
+div.sysinfo tr.boxbody {
+  color: #000000;
+  background-color: #ffffff;
+}
+
+div.sysinfo tr.boxbody td {
+	
+	border-bottom: 2px solid #ebebeb; 
+	padding: 3px;
+	font-size: 8pt;
+	line-height: 130%;
+	font-family: "Verdana", "Bitstream Vera Sans", sans-serif;
+}
+
+
+/* Begin main navigation links CSS */
+
+div.global_nav {
+	
+	border-bottom: 2px solid #dddddd; 
+	height: 32px; 
+}
+
+#page_nav {
+	
+	border-bottom: 2px solid #dddddd;
+	
+}
+
+#page_nav ul {
+	
+    margin: 0;
+    padding: 0;
+    list-style: none;
+	margin-left: 12px; 
+	list-style-position: outside;
+}
+
+#page_nav li {
+	
+	height: 16px;
+	padding-right: 15px;
+	
+    float: left;
+    font-weight: bold;
+    line-height: 16px;
+    background: #7a8388;
+	padding-left: 10px; 
+	border-right: 1px solid #dddddd;
+    border-top: 1px solid #dddddd;
+}
+
+#page_nav li:first-child {
+    
+    border-left: 1px solid #dddddd;    
+}
+
+
+#page_nav li.active {
+	
+    background-color: #4c555a;
+	
+}
+
+#page_nav li a {
+	
+	color: rgb(255, 255, 255);
+	text-decoration: none;
+	font-weight: bold; 
+	
+}
+
+
+
+#support_nav ul {
+	
+	list-style: none;
+	list-style-position: outside;
+	margin-left: 0;
+	margin-top: 10px; 
+	padding-left: 10px; 
+	
+}
+
+#support_nav li {
+	
+	display: block;
+	padding-top: 3px;
+	padding-bottom: 3px; 
+	margin-top: 3px;
+	margin-bottom: 3px; 
+	background: url('/images/icons/bullet_wrench.png') left no-repeat; 
+	
+}
+
+.support_nav_title {
+	
+	padding-left: 10px;
+	padding-top: 5px;
+	padding-bottom: 5px;
+	font-weight: bold;
+	background: rgb(235, 235, 235);
+	
+}
+
+#support_nav li a {
+	
+	margin-left: 20px; 
+	text-decoration: none; 
+	font-weight: bold;
+}
+
+#support_nav li span {
+	
+	margin-left: 20px; 
+	border-bottom: 2px solid rgb(220, 220, 220);
+	font-weight: bold; 
+}
+
+
+.sub_nav_title {
+	
+	padding-left: 10px;
+	padding-top: 5px;
+	padding-bottom: 5px;
+	font-weight: bold;
+	background: rgb(235, 235, 235);
+	
+}
+
+#sub_nav ul {
+	
+	list-style: none;
+	list-style-position: outside;
+	margin-left: 0;
+	margin-top: 10px; 
+	padding-left: 10px;
+    display: block; 
+}
+
+#sub_nav li {
+	
+	display: block;
+	padding-top: 3px;
+	padding-bottom: 3px; 
+	margin-top: 3px;
+	margin-bottom: 3px; 
+	background: url('/images/icons/bullet_wrench.png') left no-repeat; 
+	
+}
+
+
+
+<?php
+
+$supportnavicons = array("support_register",
+            "support_bug",
+            "support_get",
+            "support_knowledgebase",
+            "support_forums", 
+            "support_admin_guide"); 
+
+
+$subnavicons = array("quota_group",
+			"quota_guest",
+			"quota_user",
+			"services_enable_disable",
+			"services_iscsi",
+			"services_ldap",
+			"services_smb",
+			"services_ups",
+			"services_rsync",
+			"services_ftp",
+            "shares_existing",
+            "shares_snapshot",
+            "system_backup",
+            "system_clock",
+            "system_console",
+            "system_ha_cluster",
+            "system_network",
+            "system_notification",
+            "system_shutdown",
+            "system_update",
+            "system_ups",
+			"status_system_overview",
+            "volumes_create",
+            "volumes_group",
+            "volumes_iscsi",
+            "volumes_logical",
+            "volumes_physical",
+            "volumes_raid",
+            "accounts_accounts",
+            "accounts_adminpassword",
+            "accounts_groups",
+            "accounts_users",
+		    "accounts_administration"); 
+
+foreach ($subnavicons as $key => $value) {
+	
+	print ("#sub_nav li." . $value . " {\n");
+	print("\n");
+	print("\tbackground: url('" . $GLOBALS["LINK_ICON_DIR"] . "/". $value . ".png') left no-repeat;\n");
+	print("}\n\n"); 
+	
+}
+
+foreach ($supportnavicons as $key => $value) {
+	
+	print ("#support_nav li." . $value . " {\n");
+	print("\n");
+	print("\tbackground: url('" . $GLOBALS["LINK_ICON_DIR"] . "/". $value . ".png') left no-repeat;\n");
+	print("}\n\n"); 
+	
+}
+
+
+
+
+?>
+
+
+#sub_nav li.volumes_group {
+	
+	background: url('<?php print ($GLOBALS["LINK_ICON_DIR"] . "/volumes_group.png");?>') left no-repeat; 
+	
+}
+
+
+#sub_nav li a {
+	
+	margin-left: 20px; 
+	text-decoration: none; 
+	font-weight: bold;
+    padding-right: 0;
+    max-width: 140px; 
+}
+
+
+#sub_nav a.selected {
+
+    border-bottom: 2px solid rgb(220, 220, 220); 
+    color: gray;
+
+
+}
+
+#sub_nav a.selected:hover {
+        
+    color: #cc6633;
+
+}
+
+#global_nav ul {
+        
+    margin: 0;
+    padding: 0;
+    list-style: none;
+	margin-left: 12px; 
+	list-style-position: outside;
+}
+
+#global_nav li {
+        
+    height: 25px;
+	padding-right: 15px;
+	margin-right: 0px; 
+    float: left;
+    font-weight: bold;
+    line-height: 26px;
+	background-color: #7494d4; 
+	color: #f7c52f;
+	padding-left: 10px;
+    border-right: 2px solid #dddddd;
+    border-top: 2px solid #dddddd;
+       
+}
+
+#global_nav li:first-child {
+    
+    border-left: 2px solid #dddddd; 
+}
+
+span.volumes {
+	
+	background: url('/images/icons/drive_go.gif') left no-repeat;
+	display: block;
+	float: left;
+	width: 16px;
+	padding-right: 5px;
+	margin-right: 2px; 
+}
+
+span.accounts {
+	
+	background: url('/images/icons/group_edit.gif') left no-repeat;
+	display: block;
+	float: left;
+	width: 16px;
+	padding-right: 5px;
+	margin-right: 2px; 
+}
+
+span.shares {
+	
+	background: url('/images/icons/drive_network.gif') left no-repeat;
+	display: block;
+	float: left;
+	width: 16px;
+	padding-right: 5px;
+	margin-right: 2px; 
+
+}
+
+span.status {
+	
+	background: url('/images/icons/weather_cloudy.gif') left no-repeat;
+	display: block;
+	float: left;
+	width: 16px;
+	padding-right: 5px;
+	margin-right: 2px;
+
+
+}
+span.system {
+	
+	background: url('/images/icons/computer.gif') left no-repeat;
+	display: block;
+	float: left;
+	width: 16px;
+	padding-right: 5px;
+	
+
+}
+
+span.cluster {
+	
+	background: url('/images/icons/server_database.gif') left no-repeat;
+        display: block;
+        float: left;
+        width: 16px;
+        padding-right: 5px;
+
+
+}
+
+span.quota {
+	
+	background: url('/images/icons/chart_pie.gif') left no-repeat;
+	display: block;
+	float: left;
+	width: 16px;
+	padding-right: 5px;
+	margin-right: 2px; 
+
+}
+
+
+span.services {
+	
+	background: url('/images/icons/lightning.gif') left no-repeat;
+	display: block;
+	float: left;
+	width: 16px;
+	padding-right: 5px;
+	margin-right: 2px; 
+
+}
+
+#global_nav li.active {
+	
+	background-color: #4265ad;
+
+
+	
+}
+
+#global_nav a {
+
+        color: #fff;
+        text-decoration:none;
+}
+
+#global_nav a:hover {
+
+        color: #f7c52f;
+}
+
+#global_nav a.selected {
+        
+        color: #f7c52f;
+}
+
+/* End main navigation links CSS */
+
+/* Begin main body container CSS */
+
+.shadow {
+	
+	background-color: rgb(255, 255, 255);
+	background-image: url('/images/backgrounds/shadow_br.gif');
+	background-position: right bottom;
+	background-repeat: no-repeat;
+	margin-bottom: 7px;
+	min-height: 1%;
+}
+
+.shadow_tl {
+	
+	background: url('/images/backgrounds/shadow_tl.gif') top left no-repeat;
+	padding-left: 6px;
+	padding-top: 6px; 
+}
+
+.shadow_tr {
+	
+	background: url('/images/backgrounds/shadow_tr.gif') top right no-repeat; 
+	padding-right: 6px;
+}
+
+.shadow_bl {
+	
+	background: url('/images/backgrounds/shadow_bl.gif') bottom left no-repeat;
+	padding-bottom: 6px; 
+}
+
+
+
+/* End main body container CSS */
+
+/* Begin system messageblocks css */
+
+
+div.messageblock {
+
+    border: 1px solid;
+    width: 400px;
+    margin-bottom: 10px;
+    background-repeat: no-repeat; 
+    background-position: left;
+    padding-top: 3px;
+    padding-bottom: 5px;
+    min-height: 32px; 
+    
+    
+}
+
+div.messageblock-info {
+
+    border-color: rgb(215, 219, 231) ;   
+    background-color: rgb(225, 229, 241);
+    background-image: url("/images/messageblock/info.png");
+   
+}
+
+
+div.messageblock-internal {
+
+    margin-left: 60px;
+    margin-top: 3px;
+    margin-bottom: 3px;
+    margin-right: 3px;
+    padding-right: 10px; 
+}
+
+
+div.messageblock-error {
+
+    border-color: rgb(225, 137, 136); 
+    background-color: rgb(255,167,166);
+    background-image: url("/images/messageblock/error.png");
+    color: red;
+    font-weight: bold; 
+}
+
+
+div.messageblock-warning {
+
+    border-color: rgb(245, 232, 238) ;
+    background-color: rgb(255, 242, 248) ;
+    background-image: url("/images/messageblock/warning.png");
+}
+
+
+p.footer {
+    
+    color: white;     
+}
+
+p.footer a {
+
+    color: rgb(217, 228, 255);     
+
+}
+/* End system messageblocks css*/

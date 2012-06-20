@@ -1,0 +1,181 @@
+<?xml version="1.0"?>
+
+<services>
+
+
+     <service name="qla2x00tgt">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="try-restart"/>
+        <function name="restart"/>
+        <function name="reload"/>
+	<function name="force-reload"/>
+        <daemon name="qla2x00tgt"/>
+	<meta name="desc">FC Target</meta>
+        <pidfile path=""/>
+    </service>
+
+     <service name="scst">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="try-restart"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <function name="force-reload"/>
+        <daemon name="scst"/>
+        <meta name="desc">SCST Target</meta>
+        <pidfile path=""/>
+    </service>
+
+    <service name="corosync">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="try-restart"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <function name="force-reload"/>
+	<function name="condrestart"/>
+        <daemon name="corosync"/>
+        <meta name="desc">Cluster Manager</meta>
+        <pidfile path=""/>
+    </service>
+
+
+    <service name="acpid">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <function name="condrestart"/>
+        <daemon name="acpid"/>
+        <meta name="desc">ACPI Daemon</meta>
+        <pidfile path=""/>
+    </service>
+
+
+    <service name="nfs">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <function name="condrestart"/>
+        <daemon name="nfsd"/>
+        <meta name="desc">NFS Server</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="smb">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <function name="status"/>
+        <function name="condrestart"/>
+        <daemon name="smbd"/>
+        <meta name="desc">CIFS Server</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="iscsi-target">
+        <function name="start"/>
+        <function name="stop"/>
+	<function name="status"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <function name="pause"/>
+        <function name="resume"/>
+        <daemon name="ietd"/>
+        <meta name="desc">iSCSI Target</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="httpd">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="fullstatus"/>
+        <function name="graceful"/>
+        <function name="configtest"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <daemon name="httpd"/>
+        <meta name="desc">HTTP/Dav Server</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="proftpd">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="suspend"/>
+        <function name="restart"/>
+        <function name="reread"/>
+        <function name="resume"/>
+        <daemon name="proftpd"/>
+        <meta name="desc">FTP Server</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="rsync">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <function name="condrestart"/>
+        <daemon name="rsyncd"/>
+        <meta name="desc">RSync Server</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="ldap">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="restart"/>
+        <function name="status"/>
+        <function name="condrestart"/>
+        <daemon name="slapd"/>
+        <meta name="desc">LDAP Container</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="open-iscsi">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="restart"/>
+        <function name="condrestart"/>
+        <function name="status"/>
+        <daemon name="iscsid"/>
+        <meta name="desc">iSCSI Initiator</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="upsd">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <function name="powerdown"/>
+        <function name="status"/>
+        <daemon name="upsd"/>
+        <meta name="desc">UPS Manager</meta>
+        <pidfile path=""/>
+    </service>
+    
+    <service name="upsmon">
+        <function name="start"/>
+        <function name="stop"/>
+        <function name="status"/>
+        <function name="restart"/>
+        <function name="reload"/>
+        <daemon name="upsmon"/>
+        <meta name="desc">UPS Monitor</meta>
+        <pidfile path=""/>
+    </service>
+    
+</services>

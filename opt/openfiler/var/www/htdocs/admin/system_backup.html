@@ -1,0 +1,229 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+
+$uploaddir = '/tmp/';
+$tmpdir = '/tmp/';
+
+require("version.inc");
+require("pre.inc");
+require("network.inc");
+
+
+function SendDownload($filename, &$errmsg)
+{
+	$ph = popen("export LANG=C; /usr/bin/sudo /bin/cat " . escapeshellarg($filename), "r");
+
+	if (!$ph)
+		return false;
+
+	while ($block = fread($ph, 4096))
+		$content .= $block;
+
+	pclose($ph);
+
+	header("Pragma: public");
+	header("Expires: 0");
+	header("Cache-Control: must-revalidate, post-check=0, pre-check=0");
+	header("Content-Type: application/force-download");
+	header("Content-Type: application/octet-stream");
+	header("Content-Type: application/download");
+	header("Content-Disposition: attachment; filename=" . basename($filename) . ";");
+	header("Content-Transfer-Encoding: binary");
+	$length = array_sum(count_chars($content));
+	header("Content-Length: ". $length);
+
+	echo $content;
+	exit();
+
+}
+
+
+////////////////////////////////////////
+///
+/// Backup Section
+///
+////////////////////////////////////////
+
+if ($Download){
+	$tmpdir .= "backup_archives/";
+	mkdir($tmpdir);
+
+	$net = new Network();
+	$hostname = explode(".",$net->GetHostname());
+
+	$full_version = trim($of_info_version);
+	$version_num = exec("echo $full_version | sed -e 's/\.[^\.]*//2' -e 's/\./-/'");
+	$filename = "backup-openfiler_" . $hostname[0] . "_v" . $version_num . "_" . strftime("%m-%d-%Y-%H-%M", time()) . ".tgz";
+	$tmpfile = $tmpdir . $filename;
+	$fstab = "fstab_mnt";
+
+	// copy fstab mnt information
+	$command = "export LANG=C; /usr/bin/sudo grep /mnt/ /etc/fstab > /opt/openfiler/etc/" . $fstab;
+	exec($command);
+
+	// tar etc files
+	$command = "export LANG=C; /usr/bin/sudo /bin/tar --ignore-failed-read -cPpzf " . $tmpfile . " --exclude /opt/openfiler/etc/httpd/logs --exclude /opt/openfiler/etc/update.log /opt/openfiler/etc/";
+	exec($command);
+
+	// Clean Up
+	$file = "/opt/openfiler/etc/" . $fstab;
+	unlink($file);
+
+	// download file
+	SendDownload($tmpfile);
+
+print($tmpfile);
+
+}
+
+/////////////////////////////////////////////
+/// Delete backup file from cancelled upload
+/////////////////////////////////////////////
+if ($Cancel) {
+	$file = $tmpdir . $archive;
+	unlink($file);
+}
+
+include("authenticated.inc");
+
+	generic_header(array("title" => _("System : Configuration Backup")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_GENERAL_BACKUP");
+
+//Restore Prompting
+
+	if (($Upload) && ($_FILES['archive']['name'])) {
+
+		//copy file to tmp location
+		move_uploaded_file($_FILES['archive']['tmp_name'], $tmpdir . $_FILES['archive']['name']);
+
+		//Display a restore confirmation
+		print("<h3 align=\"center\">Restore Confirmation</h3>\n");
+		print("Are you sure that you would like to restore the configuration archive:<br /><br />");
+		print("<font color=\"green\">" . $_FILES['archive']['name'] . "?\n");
+		print("<form enctype=\"multipart/form-data\" action=\"system_backup.html\" method=\"post\">\n");
+		print("<input type=\"hidden\" name=\"archive\" value=\"" . $_FILES['archive']['name'] . "\"/></p>\n");
+
+		print("\t<input type=\"submit\" name=\"Confirm\" value=\"Yes\" />\n");
+		print("\t<input type=\"submit\" name=\"Cancel\" value=\"No\" />\n");
+		print("</form>\n");
+	}
+	else{
+
+		print("<h3 align=\"center\">Backup Configuration</h3>\n");
+		print("<div align=\"center\">\n\n");
+		print("<form action=\"system_backup.html\" method=\"post\" enctype=\"multipart/form-data\">\n");
+		print("Click download to perform an instant backup snapshot<br /><br />\n");
+		print("\t<input type=\"submit\" name=\"Download\" value=\"Download\" />\n");
+		print("</form>\n");
+		print("</div>\n");
+
+		print("<hr width=\"80%\"/>");
+		print("<h3 align=\"center\">Restore Configuration</h3>\n");
+		print("<p align=\"center\">Restore by upload</p>\n");
+		print("<form enctype=\"multipart/form-data\" action=\"system_backup.html\" method=\"post\">\n");
+		print("<input type=\"hidden\" name=\"MAX_FILE_SIZE\" value=\"200000\" />\n");
+		print("<input type=\"file\" name=\"archive\" size=\"40\"/><br /><br />\n");
+		print("<input class=\"button\" type=\"submit\" name=\"Upload\" value=\"Upload\"/>\n");
+		print("</form>\n");
+		print("</div>\n");
+	}
+////////////////////////////////////////////////////////////////////////
+//Restore section
+//
+// This is where the archive is processed and added to the system
+////////////////////////////////////////////////////////////////////////
+	if ($Confirm) {
+		$file = $tmpdir . $archive;
+		$command = "export LANG=C; /usr/bin/sudo /bin/tar -xPpzf " . $file;
+		passthru($command, $status);
+		print("Upload Status: ");
+		if ($status != 0)
+			print("<font color=\"red\">Archive file corrupt</font>");
+		else
+			print("<font color=\"green\">File sucessfully uploaded</font>");
+
+		//////////////////////////////////////
+		// backup original fstab file
+		//////////////////////////////////////
+		$backupfile = "/etc/fstab_backup";
+		if (!file_exists($backupfile)) {
+			$command = "export LANG=C; /usr/bin/sudo cp /etc/fstab " . $backupfile;
+			exec($command);
+		}
+
+		//////////////////////////////////////
+		//  create the fstab file
+		//////////////////////////////////////
+
+		$tmpfstab = $tmpdir . "tmp_fstab";
+
+		//strip /mnt from fstab
+		$command = "export LANG=C; /usr/bin/sudo grep /mnt /etc/fstab -v > " . $tmpfstab;
+		exec($command);
+
+		//add fstab mounts to fstab
+		$command = "export LANG=C; /usr/bin/sudo cat /opt/openfiler/etc/fstab_mnt >> " . $tmpfstab;
+		exec($command);
+		//////////////////////////////////////
+		//  move the new fstab to /etc
+		//////////////////////////////////////
+		$command = "export LANG=C; /usr/bin/sudo mv -f " . $tmpfstab . " /etc/fstab";
+		exec($command);
+
+		//make mount directories
+		$command = "export LANG=C; /usr/bin/sudo cat /opt/openfiler/etc/fstab_mnt  | cut -d ' ' -f2";
+		exec($command, $output);
+		foreach ($output as $dir) {
+			$command = "export LANG=C; /usr/bin/sudo /bin/mkdir -pv " . $dir . "; export LANG=C; /usr/bin/sudo /bin/mount  " . $dir;
+			exec($command);
+		}
+
+		//delete fstab_mnt file
+		unlink("/opt/openfiler/etc/fstab_mnt");
+
+		//delete backup file file
+		$file = $tmpdir . $archive;
+		unlink($file);
+
+	}
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

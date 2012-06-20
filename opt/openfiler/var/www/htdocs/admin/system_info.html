@@ -1,0 +1,197 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+	require("md.inc");
+    include("authenticated.inc");
+
+	global $info_notify_email;
+	global $info_sender_email;
+	global $info_audible_alert;
+	global $info_alarm_interval;
+	global $info_time_unit;
+
+	$info_notify_email = "";
+	$info_sender_email = "";
+	$info_audible_alert = "";
+	$info_alarm_interval = "";
+	$info_time_unit = "";
+
+	function info_startelement($parser, $name, $attrs)
+	{
+		global $info_notify_email;
+		global $info_sender_email;
+		global $info_mail_server;
+		global $info_audible_alert;
+		global $info_alarm_interval;
+		global $info_time_unit;
+
+		if ($name == "NOTIFY-EMAIL")
+			$info_notify_email = $attrs["ADDRESS"];
+		if ($name == "SENDER-EMAIL")
+			$info_sender_email = $attrs["ADDRESS"];
+		if ($name == "MAIL-SERVER")
+			$info_mail_server = $attrs["NAME"];
+		if ($name == "AUDIBLE-ALERT")
+			$info_audible_alert = $attrs["STATUS"];
+		if ($name == "ALARM-INTERVAL")
+			$info_alarm_interval = $attrs["INTERVAL"];
+		if ($name == "TIME-UNIT")
+			$info_time_unit = $attrs["UNIT"];
+	}
+
+	function info_endelement($parser, $name)
+	{
+	}
+
+	$info_parser = xml_parser_create();
+	xml_set_element_handler($info_parser, "info_startelement", "info_endelement");
+	$info_fp = fopen("/opt/openfiler/etc/info.xml", "r");
+
+	while ($info_data = fread($info_fp, 4096))
+		xml_parse($info_parser, $info_data, feof($info_fp));
+
+	fclose($info_fp);
+	xml_parser_free($info_parser);
+
+
+	if (isset($action) && ($action == "setinfo"))
+	{
+		if ($time_unit == "minutes")
+			if ($alarm_interval < 1 )
+				$alarm_interval=1;
+		if ($time_unit == "seconds")
+			if ($alarm_interval < 10 )
+				$alarm_interval=10;
+
+		$fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/info.xml", "w");
+
+		fputs($fp, "<?xml version=\"1.0\" ?>\n\n");
+		fputs($fp, "<info>\n");
+
+		fputs($fp, "\t<notify-email address=\"" . trim($notify_email) . "\" />\n");
+		fputs($fp, "\t<sender-email address=\"" . trim($sender_email) . "\" />\n");
+		fputs($fp, "\t<mail-server name=\"" . trim($mail_server) . "\" />\n");
+		fputs($fp, "\t<audible-alert status=\"" . $audible_alert . "\" />\n");
+		fputs($fp, "\t<alarm-interval interval=\"" . floatval($alarm_interval) . "\" />\n");
+		fputs($fp, "\t<time-unit unit=\"" . $time_unit . "\" />\n");
+
+		fputs($fp, "</info>\n\n");
+
+		pclose($fp);
+
+		$file = new File("/etc/mail/sendmail.cf");
+		$file->Load();
+		while (!$file->EOF()){
+			if (preg_match("/^DS.*/", $file->GetLine(), $match)){
+				$old_mail_server = str_replace("DS", "", $match[0]);
+				break;
+			}
+		}
+		if ($old_mail_server != $mail_server){
+			$file->EditLine("^DS", "DS" . trim($mail_server));
+			$file->Save();
+
+			exec("export LANG=C; /usr/bin/sudo /sbin/service sendmail restart");
+		}
+
+		if ($sendtest)
+			exec("sudo /opt/openfiler/bin/mdalert -t");
+
+		update_mdadm_conf();
+
+		header("Location: ./system_info.html");
+		exit;
+	}
+
+
+	generic_header(array("title" => _("System : Notification Setup")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_GENERAL_NOTIFICATION");
+	print("<h3 align=\"center\">Notification Configuration</h3>\n");
+
+	print("<form name=\"info\" action=\"system_info.html\" method=\"post\">\n");
+	print("<input type=\"hidden\" name=\"action\" value=\"setinfo\" />\n");
+
+	print("<div align=\"center\">\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+?>
+	<tr>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Key</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Value</strong></td>
+	</tr>
+	<tr>
+		<td align="right" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><strong>Receipient's Email Address:</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><input type="text" name="notify_email" size="50" value="<?php print($info_notify_email); ?>" /></td>
+	</tr>
+	<tr>
+		<td align="right" bgcolor="<?php print($GLOBALS["color_table_row2"]); ?>"><strong>Sender's Email Address:</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row2"]); ?>"><input type="text" name="sender_email" size="50" value="<?php print($info_sender_email); ?>" /></td>
+	</tr>
+	<tr>
+		<td align="right" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><strong>Mail Server (optional):</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>"><input type="text" name="mail_server" size="50" value="<?php print($info_mail_server); ?>" /></td>
+	</tr>
+	<tr>
+		<td align="right" bgcolor="<?php print($GLOBALS["color_table_row2"]); ?>"><strong>Audible Alarm Interval:</strong></td>
+		<td bgcolor="<?php print($GLOBALS["color_table_row2"]); ?>">
+			<input type="text" name="alarm_interval" size="20" value="<?php print($info_alarm_interval); ?>" />
+			<input type="radio" name="time_unit" value="seconds"<?php if ("$info_time_unit" == "seconds") print("checked=\"checked\""); ?> />seconds
+			<input type="radio" name="time_unit" value="minutes"<?php if ("$info_time_unit" == "minutes") print("checked=\"checked\""); ?> />minutes
+		</td>
+	</tr>
+	<tr>
+		<td colspan="2" align="center" bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>">
+			<input type="checkbox" name="audible_alert" value="<?php print($info_audible_alert); ?> "/>Audible Alert
+		</td>
+	</tr>
+	<tr><td colspan="2" align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>">
+		<input type="submit" name="sendtest" value="Send Test Message" />
+		<input type="submit" name="submit" value="Update Information" />
+	</td></tr>
+<?php
+
+	print("</table>\n");
+	print("</div>\n");
+
+	print("</form>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

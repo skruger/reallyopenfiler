@@ -1,0 +1,432 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+	include("authenticated.inc");
+
+	global $volumes_id;
+	global $volumes_name;
+	global $volumes_mountpoint;
+	global $volumes_vg;
+	global $volumes_fstype;
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+	$volumes_fstype = array();
+
+
+	function readVolumeData() {
+            global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg, $volumes_fstype;
+            $volumesfile = "/opt/openfiler/etc/volumes.xml";
+            $volumesdocument = DOMDocument::load($volumesfile);
+            $volumeslists = $volumesdocument->getElementsByTagName("volume");
+
+            foreach($volumeslists as $volumeslist) {
+                if ($volumeslist->getAttribute("fstype") != "iscsi") {
+                    array_push($volumes_id, $volumeslist->getAttribute("id"));
+                    array_push($volumes_name, $volumeslist->getAttribute("name"));
+                    array_push($volumes_mountpoint, $volumeslist->getAttribute("mountpoint"));
+                    array_push($volumes_vg, $volumeslist->getAttribute("vg"));
+                    array_push($volumes_fstype, $volumeslist->getAttribute("fstype"));
+                }
+            }
+
+	}
+
+	readVolumeData();
+
+
+
+        $serverstring = "";
+	$netbiosname = "";
+	$winsserver = "";
+	$idmapsync = "nosync";
+	$ldapidmaptls = FALSE;
+	$ldapidmapserver = "";
+	$ldapidmapsuffix = "";
+	$homesvolume_vg = "";
+	$homesvolume_lv = "";
+	$homesvolume_mountpoint = "";
+        $snapshothomes = 0;
+	$encryptedpasswords = 1;
+	$ldapusersuffix = "";
+        $ldapgroupsuffix = "";
+	$defaultdomain = 1;
+	$unixcharset = "UTF8";
+	$displaycharset = "UTF8";
+	$doscharset = "850";
+
+
+	function smb_startelement($parser, $name, $attrs) {
+            global $serverstring;
+            global $netbiosname;
+            global $winsserver;
+            global $idmapsync;
+            global $ldapidmaptls;
+            global $ldapidmapserver;
+            global $ldapidmapsuffix;
+            global $homesvolume_vg;
+            global $homesvolume_lv;
+            global $homesvolume_mountpoint;
+            global $snapshothomes;
+            global $encryptedpasswords;
+            global $defaultdomain;
+            global $ldapusersuffix;
+            global $ldapgroupsuffix;
+            global $unixcharset;
+            global $displaycharset;
+            global $doscharset;
+
+            if ($name == "SERVERSTRING")
+                $serverstring = $attrs["VALUE"];
+            else if ($name == "NETBIOSNAME")
+                $netbiosname = $attrs["VALUE"];
+            else if ($name == "WINSSERVER")
+                $winsserver = $attrs["VALUE"];
+            else if ($name == "IDMAPSYNC")
+                $idmapsync = $attrs["VALUE"]; 
+            else if ($name == "LDAPIDMAPTLS")
+                $ldapidmaptls = ($attrs["VALUE"] == "on") ? TRUE : FALSE;
+            else if ($name == "LDAPIDMAPSERVER") {
+                $ldapidmapserver = $attrs["VALUE"];
+
+                if (strlen($ldapidmapserver) == 0)
+                    $ldapidmapserver = "127.0.0.1";
+            }
+            else if ($name == "LDAPIDMAPSUFFIX") {
+                $ldapidmapsuffix = $attrs["VALUE"];
+
+                if (strlen($ldapidmapsuffix) == 0)
+                    $ldapidmapsuffix = "ou=Idmap";
+            }
+            else if ($name == "HOMESVOLUME") {
+                $homesvolume_vg = $attrs["VG"];
+                $homesvolume_lv = $attrs["LV"];
+                $homesvolume_mountpoint = $attrs["MOUNTPOINT"];
+            }
+            else if ($name == "SNAPSHOTHOMES")
+                $snapshothomes = ($attrs["VALUE"] == "on") ? TRUE : FALSE;
+
+            else if ($name == "ENCRYPTEDPASSWORDS")
+                $encryptedpasswords = ($attrs["VALUE"] == "on");
+
+            else if ($name == "WINBINDPOLICY")
+                $defaultdomain = ($attrs["VALUE"] == "on");
+
+            else if ($name == "LDAPUSERSUFFIX") {
+                $ldapusersuffix = $attrs["VALUE"];
+
+                if(strlen($ldapusersuffix) == 0)
+                    $ldapusersuffix = "ou=People";
+            }
+
+            else if ($name == "LDAPGROUPSUFFIX") {
+                $ldapgroupsuffix = $attrs["VALUE"];
+
+                if(strlen($ldapgroupsuffix) == 0)
+                        $ldapgroupsuffix = "ou=Group";
+            }
+
+            else if ($name == "DOSCHARSET")
+               $doscharset = (strcmp($attrs["VALUE"], "") == 0) ?
+                               $doscharset : $attrs["VALUE"];
+
+            else if ($name == "UNIXCHARSET")
+                $unixcharset = (strcmp($attrs["VALUE"], "") == 0) ?
+                                $unixcharset : $attrs["VALUE"];
+
+            else if ($name == "DISPLAYCHARSET")
+                $displaycharset = (strcmp($attrs["VALUE"], "") == 0) ?
+                                  $displaycharset : $attrs["VALUE"];
+	}
+
+	function smb_endelement($parser, $name)
+	{
+	}
+
+	$smb_parser = xml_parser_create();
+	xml_set_element_handler($smb_parser, "smb_startelement", "smb_endelement");
+	$smb_fp = fopen("/opt/openfiler/etc/smb_settings.xml", "r");
+
+	while ($smb_data = fread($smb_fp, 4096))
+	    xml_parse($smb_parser, $smb_data, feof($smb_fp));
+
+	fclose($smb_fp);
+	xml_parser_free($smb_parser);
+
+	if (strlen(trim($netbiosname)) == 0) {
+	    $of_uname = posix_uname();
+            $tmparr = preg_split('/[^a-zA-Z0-9\-]/', $of_uname["nodename"]); 
+	    $netbiosname = strtoupper($tmparr[0]);
+	}
+
+	if (strlen(trim($newnetbiosname)) == 0) {
+	    $of_uname = posix_uname();
+            $tmparr = preg_split('/[^a-zA-Z0-9\-]/', $of_uname["nodename"]);
+            $newnetbiosname = strtoupper($tmparr[0]);
+
+	}
+
+	function addDomElement($dom, $domElement, $key, $value) {
+
+            $domnode = $dom->createElement($key);
+            if (!is_array($value)) {
+                $domnode->setAttribute("value", $value);
+            }
+
+            else {
+                foreach($value as $key => $value2)
+                    $domnode->setAttribute($key, $value2);
+            }
+
+            $domElement->appendChild($domnode);
+
+	}
+
+
+	$new_homesvolume_lv = "";
+	$new_homesvolume_vg = "";
+	$new_homesvolume_mountpoint = "";
+
+	function isNewHomesVolume() {
+
+            global $new_homesvolume_lv, $new_homesvolume_vg, $new_homesvolume_mountpoint;
+            global $volumes_id, $newhomesvolume, $volumes_vg, $volumes_mountpoint, $volumes_name;
+            for ($i = 0; $i < count($volumes_name); $i++)
+                if ($newhomesvolume == ("#!@-" . $volumes_id[$i] . "-#!@-" . $volumes_vg[$i] . "-#!@")) {
+                    $new_homesvolume_lv = $volumes_id[$i];
+                    $new_homesvolume_vg = $volumes_vg[$i];
+                    $new_homesvolume_mountpoint = $volumes_mountpoint[$i];
+                    return TRUE;
+                }
+
+            return FALSE;
+
+	}
+
+	$apply_configuration = array("services" => "reload", "chmod" => "no", "chmod_path" => "");
+
+
+	if ($applysmbsettings == "Apply") {
+
+            global $apply_configuration, $defaultdomain, $encryptedpasswords, $ldapusersuffix, $ldapgroupsuffix;
+            global $new_homesvolume_lv, $new_homesvolume_vg, $new_homesvolume_mountpoint;
+
+
+            $applysettings = (array_slice($_POST, 0, (count($_POST) - 1), true));
+
+            $smbsettingsfile = "/opt/openfiler/etc/smb_settings.xml";
+            $smbdomdocument = DOMDocument::load($smbsettingsfile);
+
+
+            $dom = new DOMDocument('1.0');
+            $dom->formatOutput = true;
+            $smb = $dom->createElement('smb');
+            foreach ($applysettings as $key => $value) {
+                switch($key){
+                    case "newserverstring":
+                        addDomElement($dom, $smb, "serverstring", $value);
+                        break;
+                    case "newnetbiosname":
+                        addDomElement($dom, $smb, "netbiosname", $value);
+                        break;
+                    case "newwinsserver":
+                        addDomElement($dom, $smb, "winsserver", $value);
+                        break;
+                    case "newencryptedpasswords":
+                        addDomElement($dom, $smb, "encryptedpasswords", $value);
+                        break;
+                    case "newdefaultdomain":
+                        if ($value != $defaultdomain)
+                            $apply_configuration = array("services" => "keep", "chmod" => "no", "chmod_path" => "", "winbindreload" => true);
+                        addDomElement($dom, $smb, "winbindpolicy", $value);
+                        break;
+                    case "newldapusersuffix":
+                        if ($value != $ldapusersuffix)
+                            $apply_configuration = array("services" => "reload", "chmod" => "no", "chmod_path" => "", "winbindreload" => true);
+                        addDomElement($dom, $smb, "ldapusersuffix", $value);
+                        break;
+                    case "newldapgroupsuffix":
+                        if ($value != $ldapgroupsuffix)
+                            $apply_configuration = array("services" => "reload", "chmod" => "no", "chmod_path" => "", "winbindreload" => true);
+                        addDomElement($dom, $smb, "ldapgroupsuffix", $value);
+                        break;
+                    case "newdisplaycharset":
+                        if ($value != $displaycharset)
+                            $apply_configuration = array("services" => "reload", "chmod" => "no", "chmod_path" => "", "winbindreload" => true);
+                        addDomElement($dom, $smb, "displaycharset", $value);
+                        break;
+                    case "newunixcharset":
+                        if ($value != $unixcharset)
+                            $apply_configuration = array("services" => "reload", "chmod" => "no", "chmod_path" => "", "winbindreload" => true);
+                        addDomElement($dom, $smb, "unixcharset", $value);
+                        break;
+                    case "newdoscharset":
+                        if ($value != $doscharset)
+                            $apply_configuration = array("services" => "reload", "chmod" => "no", "chmod_path" => "", "winbindreload" => true);
+                        addDomElement($dom, $smb, "doscharset", $value);
+                        break;
+                    case "newhomesvolume":
+                        if ($value != "Disabled" && isNewHomesVolume()) {
+                            $apply_configuration = array("services" => "reload", "chmod" => "no", "chmod_path" => "", "winbindreload" => true);
+                            addDomElement($dom, $smb, "homesvolume",
+                                          array("vg"=>$new_homesvolume_vg,
+                                                "lv"=>$new_homesvolume_lv,
+                                                "mountpoint"=>$new_homesvolume_mountpoint)
+                                         );
+                        }
+                        else
+                                addDomElement($dom, $smb, "homesvolume", array("vg"=>"","lv"=>"", "mountpoint"=>""));
+
+                        break;
+                    case "newsnapshothomes":
+                            addDomElement($dom, $smb, "snapshothomes", $value);
+                            break;
+                    default:
+                            break;
+                }
+
+            }
+
+            global $idmapsync, $ldapidmaptls, $ldapidmapserver, $ldapidmapsuffix;
+
+            $extranodes = array("idmapsync" => $idmapsync,
+                                "ldapidmaptls" => $ldapidmaptls,
+                                "ldapidmapserver" => $ldapidmapserver,
+                                "ldapidmapsuffix" => $ldapidmapsuffix);
+
+            foreach($extranodes as $key => $value) {
+
+                if ($key == "ldapidmaptls")
+                    (($value == "on") ? $value = "on" : $value = "off");
+
+                addDomElement($dom, $smb, $key, $value);
+            }
+
+            $dom->appendChild($smb);
+            $dom->save($smbsettingsfile);
+
+            apply_configuration($apply_configuration);
+
+            header("Location: ./services_smb.html");
+            exit;
+    }
+
+
+	generic_header(array("title" => _("Services : SMB/CIFS Setup")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_SERVICES_SMB");
+	print("<h3 align=\"center\">SMB settings</h3>\n");
+
+	print("<div align=\"center\">\n");
+	print("<form action=\"services_smb.html\" method=\"post\">\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>Server string:</strong></td>\n");
+	print("\t<td class=\"color_table_row1\"><input type=\"text\" name=\"newserverstring\" value=\"" . htmlentities($serverstring) . "\" /></td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>NetBIOS name:</strong></td>\n");
+	print("\t<td class=\"color_table_row2\"><input type=\"text\" name=\"newnetbiosname\" value=\"" . htmlentities($netbiosname) . "\" /></td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>WINS server:</strong></td>\n");
+	print("\t<td class=\"color_table_row1\"><input type=\"text\" name=\"newwinsserver\" value=\"" . htmlentities($winsserver) . "\" /></td>\n");
+	print("</tr>\n");
+
+	print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>Passwords:</strong></td>\n");
+	print("\t<td class=\"color_table_row2\">\n");
+	print("\t\t<select name=\"newencryptedpasswords\">\n");
+	print("\t\t\t<option value=\"on\"" . (($encryptedpasswords != 0) ? " selected=\"selected\"" : "") . ">Use encrypted passwords</option>\n");
+	print("\t\t\t<option value=\"off\"" . (($encryptedpasswords == 0) ? " selected=\"selected\"" : "") . ">Use cleartext passwords</option>\n");
+	print("\t\t</select>\n");
+	print("\t</td>\n");
+	print("</tr>\n");
+
+	print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>Winbind Policy:</strong></td>\n");
+	print("\t<td class=\"color_table_row1\">\n");
+	print("\t\t<select name=\"newdefaultdomain\">\n");
+	print("\t\t\t<option value=\"on\"" . (($defaultdomain != 0) ? " selected=\"selected\"" : "") . ">Use default domain</option>\n");
+	print("\t\t\t<option value=\"off\"" . (($defaultdomain == 0) ? " selected=\"selected\"" : "") . ">No default domain</option>\n");
+	print("\t\t</select>\n");
+	print("\t</td>\n");
+	print("</tr>\n");
+
+        print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>LDAP User Suffix:</strong></td>\n");
+	print("\t<td class=\"color_table_row2\"><input type=\"text\" name=\"newldapusersuffix\" value=\"" . htmlentities($ldapusersuffix) . "\" /></td>\n");
+	print("</tr>\n");
+
+        print("<tr>\n");
+        print("\t<td align=\"right\" class=\"color_table_heading\"><strong>LDAP Group Suffix:</strong></td>\n");
+        print("\t<td class=\"color_table_row1\"><input type=\"text\" name=\"newldapgroupsuffix\" value=\"" . htmlentities($ldapgroupsuffix) . "\" /></td>\n");
+        print("</tr>\n");
+
+        print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>Display Charset:</strong></td>\n");
+	print("\t<td class=\"color_table_row2\"><input type=\"text\" name=\"newdisplaycharset\" value=\"" . htmlentities($displaycharset) . "\" /></td>\n");
+	print("</tr>\n");
+
+        print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>Unix Charset:</strong></td>\n");
+	print("\t<td class=\"color_table_row1\"><input type=\"text\" name=\"newunixcharset\" value=\"" . htmlentities($unixcharset) . "\" /></td>\n");
+	print("</tr>\n");
+
+        print("<tr>\n");
+	print("\t<td align=\"right\" class=\"color_table_heading\"><strong>DOS Charset:</strong></td>\n");
+	print("\t<td class=\"color_table_row2\"><input type=\"text\" name=\"newdoscharset\" value=\"" . htmlentities($doscharset) . "\" /></td>\n");
+	print("</tr>\n");
+
+	print("<tr>\n");
+	print("<td align=\"right\"><input type=\"submit\" name=\"applysmbsettings\" value=\"Apply\"/></td>\n");
+	print("<td align=\"left\"><input type=\"submit\" name=\"cancel\" value=\"Cancel\"/></td>\n");
+	print("</tr>\n");
+
+	print("</table>\n");
+	print("</form>\n");
+	print("</div>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

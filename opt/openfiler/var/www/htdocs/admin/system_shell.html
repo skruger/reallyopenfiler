@@ -1,0 +1,72 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+	require("md.inc");
+        include("authenticated.inc");
+
+	$openfilerserverip = $_SERVER['SERVER_ADDR']; // used by JTA for ssh
+
+
+	generic_header(array("title" => _("System : Shell")));
+	single_begin(array());
+
+?>
+
+<p>&nbsp;</p>
+<?php
+        nested_tab_begin("C_GENERAL_SSH");
+	print("<h3 align=\"center\">Secure Shell</h3>\n");
+
+	print("<div>\n");
+
+	?>
+
+	<applet width="700" height="500" archive="sshapplet/SSHTermApplet-signed.jar,sshapplet/SSHTermApplet-jdkbug-workaround-signed.jar" code="com.sshtools.sshterm.SshTermApplet" codebase="." style="border-style: solid; border-width: 1px; padding-left: 4px; padding-right: 4px; padding-top: 1px; padding-bottom: 1px;">
+	<param name="sshapps.connection.host" value="<?php print($openfilerserverip); ?>"/>
+	<param name="sshapps.connection.userName" value="root"/>
+	<param name="sshapps.connection.connectImmediately" value="true"/>
+	<param name="sshapps.connection.authenticationMethod" value="password"/>
+	<param name="sshapps.connection.showConnectionDialog" value="true"/>
+	<param name="sshapps.connection.disableHostKeyVerification" value="true"/>
+	<param name="sshterm.ui.scrollBar" value="false"/>
+	</applet>
+
+<?php
+
+
+	print("</div>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

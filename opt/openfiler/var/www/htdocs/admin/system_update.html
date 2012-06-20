@@ -1,0 +1,530 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require("pre.inc");
+        include("authenticated.inc");
+
+	$results_time_limit=60;
+	$conary_time_limit=4;
+	$conary_file="/tmp/openfiler_update";
+	$conary="/usr/bin/conary ";
+	$conary_log="/var/log/conary";
+
+	if (file_exists($conary_file)){
+		$conary_fp = fopen($conary_file, "r");
+		$last_update = explode("#",fgets($conary_fp, 4096),2);
+		$last_update = trim($last_update[0]);
+		$last_retval = explode("#",fgets($conary_fp, 4096),2);
+		$last_retval = trim($last_retval[0]);
+		fclose($conary_fp);
+	}
+	$time_start = time();
+	$time_diff = ($time_start - $last_update) / 60;
+
+	function write_footer(){
+		global $time_start;
+
+		print("Total execution time: " . strftime("%M:%S", time()-$time_start) . "<br />\n");
+		print("&copy; 2001 - 2011 Openfiler. All rights reserved.");
+		print("</div>\n");
+		print("</body>\n");
+		print("</html>\n");
+		exit;
+	}
+
+	function write_conary_info($file){
+		global $conary;
+
+		$conary_fp = fopen($file, "w");
+		fputs($conary_fp, time() . "\t#time stamp\n"); //this acts like a lock file
+		ob_flush();flush();
+		exec("sudo " . $conary . " updateall --info 2>&1", $output, $retval);
+		fputs($conary_fp, $retval . "\t\t#conary return value\n\n");
+		if ($retval){
+			if (preg_grep("/no new troves/", $output)){
+				print("List compilation complete.<br />\n");
+				print("<div style=\"width: 30em; background: white; margin: 40px; padding: 25px; border: 1px solid rgb(180,180,180);\">\n");
+				print("<br /><h3>Nothing to be updated</h3>\n");
+				print("</div>\n");
+			}
+			else{
+				//error occured during info
+				print("<font color=\"red\"><b>error occured while looking for updates</b></font><br />\n");
+				print("<br /><br />\n");
+			}
+		}
+		else{
+			foreach ($output as $line)
+				fputs($conary_fp, $line . "\n");
+		}
+
+		fclose($conary_fp);
+	}
+
+	function get_conary_info($file){
+		if (file_exists($file)){
+			$conaryp = fopen($file, "r");
+			$index=0;
+			while (!feof($conaryp)){
+				$line = trim(fgets($conaryp, 4096));
+				if (preg_match("/^[ ]*Update /i", $line)){
+					$items[$index]['Operation'] = "Update";
+					$line = substr($line, 6);
+
+					$str_pos = strpos($line, " (") + 1;
+					$temp = trim(substr($line, 0, $str_pos));
+					$line = substr($line, $str_pos);
+
+					$temp = str_replace(array("(", ")"), "", $temp);
+
+					$str_pos = strpos($temp, ":");
+					if (!empty($str_pos)){
+						$items[$index]['Module'] = trim(substr($temp, 0, $str_pos));
+						$items[$index]['Components'] = trim(substr($temp, $str_pos));
+					}
+					else{
+						$items[$index]['Module'] = trim($temp);
+					}
+
+					$str_pos = strpos($line, "->") + 2;
+					$temp = substr($line, 1, $str_pos - 3);
+					$line = substr($line, $str_pos + 1);
+
+					$items[$index]['OldVersion'] = trim(preg_replace('/\[.*/', '', $temp));
+					$items[$index]['OldVersion-short'] = preg_replace('/^.*\//', '', $items[$index]['OldVersion']);
+
+					$temp = substr($line, 0, strlen($line)-1);
+					$items[$index]['NewVersion'] = trim(preg_replace('/\[.*/', '', $temp));
+					$items[$index]['NewVersion-short'] = preg_replace('/^.*\//', '', $items[$index]['NewVersion']);
+					$index++;
+				}
+				else if (preg_match("/^[ ]*Install /", $line)){
+					$items[$index]['Operation'] = "Install";
+					$line = substr($line, 7);
+
+					$str_pos = strpos($line, "=");
+                                        $temp = trim(substr($line, 0, $str_pos));
+					$line = substr($line, $str_pos+1);
+
+                                        $temp = str_replace(array("(", ")"), "", $temp);
+                                        $str_pos = strpos($temp, ":");
+                                        if (!empty($str_pos)){
+                                                $items[$index]['Module'] = trim(substr($temp, 0, $str_pos));
+                                                $items[$index]['Components'] = trim(substr($temp, $str_pos));
+                                        }
+                                        else{
+                                                $items[$index]['Module'] = trim($temp);
+                                        }
+
+					$items[$index]['NewVersion'] = preg_replace('/\[.*/', '', trim($line));
+					$items[$index]['NewVersion-short'] = preg_replace('/^.*\//', '', $items[$index]['NewVersion']);
+					$index++;
+				}
+			}
+			fclose($conaryp);
+			return $items;
+		}
+	}
+
+	function remove_item($file, $search){
+
+		$escape_char = array("(", ")");
+		foreach ($escape_char as $char)
+			$search = str_replace($char, "\\" . $char, $search);
+
+		$input = file($file);
+		$output = preg_grep("/ " . $search . "[:( =]/", $input, true);
+		$output_p = fopen($file,'w');
+		foreach ($output as $line){
+			fputs($output_p, $line);
+		}
+		fclose($output_p);
+
+	}
+
+	print("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n");
+	print("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n");
+	print("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
+	print("<head>\n");
+	print("<title>System Update</title>\n");
+	print("<link rel=\"stylesheet\" type=\"text/css\" media=\"screen, print\" href=\"/style.css\" />\n");
+	print("<link rel=\"icon\" type=\"image/png\" media=\"screen, print\" href=\"/images/of-icon.png\" />\n");
+	print("<link rel=\"shortcut icon\" type=\"image/x-icon\" media=\"screen, print\" href=\"/images/of-icon.ico\" />\n");
+
+	print("<?xml-stylesheet type=\"text/css\" media=\"screen, print\" href=\"/style.css\" ?>\n");
+	print("<meta name=\"MSSmartTagsPreventParsing\" content=\"TRUE\" />\n");
+	print("<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n");
+?>
+	<script language="JavaScript" type="text/javascript">
+	<!--
+	function selectAll(chkBox) {
+		var form_inputs = document.getElementsByTagName('input');
+		for (i = 0; i < form_inputs.length; i++){
+			if (form_inputs[i].type == "checkbox")
+				form_inputs[i].checked = chkBox.checked;
+		}
+	}
+	function initpage() {
+		toBottom('updatelog');
+	}
+
+	function toBottom(div) {
+		var objDiv = document.getElementById(div);
+		if (objDiv != null) { objDiv.scrollTop = objDiv.scrollHeight; }
+	}
+
+	function checkAll(chkBox) {
+		var form_inputs = document.getElementsByTagName('input');
+		var bolChecked = true;
+
+		if (chkBox.checked){
+			for (i = 0; i < form_inputs.length; i++) {
+				if ((form_inputs[i].checked == false) && (form_inputs[i].name == "module[]")){
+					bolChecked = false;
+				}
+			}
+		}
+		else{
+			bolChecked = false;
+		}
+		document.update.updateall.checked = bolChecked;
+	}
+
+	function toggleLayer(Layer){
+		if (document.getElementById){
+			// this is the way the standards work
+			var style2 = document.getElementById(Layer).style;
+		}
+		else if (document.all){
+			// this is the way old msie versions work
+			var style2 = document.all[Layer].style;
+		}
+		else if (document.layers){
+			// this is the way nn4 works
+			var style2 = document.layers[Layer].style;
+		}
+		if (style2.display == "none")
+			style2.display="block";
+		else
+			style2.display="none";
+	}
+
+	// -->
+	</script>
+
+<?php
+
+	print("</head>\n");
+	print("<body onload=\"initpage()\">\n");
+	print("\n");
+	print("<div id=\"logodiv\" class=\"openfiler-logo\"></div>\n");
+
+	print("<div align=\"center\" class=\"container\" style=\"padding: 20px; width: auto;\">\n");
+	print("<h1 align=\"center\">System Update</h1>\n");
+	ob_flush();flush();
+
+	//check for a delayed or background install;
+	$at_running=exec("sudo at -l");
+	$conary_running=exec("sudo ps -A | grep conary");
+	if ((!empty($at_running)) && (!empty($conary_running))){
+		print("<br /><font color=\"red\"><strong>Background install is in progress.  Displaying log.</strong></font>");
+		print("<div id=\"updatelog\" style=\"width: 80%; height: 400px; overflow: auto; padding: 5px; margin: 10px; border: solid 1px rgb(180, 180, 180); background: white; text-align: left\">");
+		print($update_log);
+		$log = file($conary_log);
+		$log = str_replace("   ", "&nbsp;&nbsp;&nbsp;", $log);
+		$log = str_replace("\n", "<br />\n", $log);
+		foreach ($log as $line)
+			print($line);
+		print("</div>");
+
+		write_footer();
+	}
+
+	$items = get_conary_info($conary_file);
+
+	if (($submit) && (isset($module)) && (isset($items))){
+		if (!empty($silent)){
+			print("<p>Performing background update on the following packages.<br />The results of the install can be monitored from the update log</p>");
+			if (!empty($updateall)){
+				print("Updating all packages<br />\n");
+				$module_list = "update all";
+			}
+			else{
+				$module_list = "";
+				foreach ($module as $package){
+					print($package . "<br />\n");
+					$module_list .= $package . " ";
+				}
+			}
+			print("<p><a href=\"javascript: self.close()\">Close this Window</a></p>");
+
+			$fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/at now", "w");
+			if (!empty($updateall))
+				//fputs($fp, $conary . " updateall  > /dev/null 2>&1 \n");
+                                fputs($fp, $conary . " updateall > /dev/null 2>&1 \n");
+			else
+				//fputs($fp, $conary . " update  " . $module_list . " > /dev/null 2>&1 \n");
+                                fputs($fp, $conary . " update  " . $module_list . " > /dev/null 2>&1 \n");
+			pclose($fp);
+
+			unlink($conary_file);
+
+			write_footer();
+		}
+
+		print("<br />\n");
+		print("<p>The installation progress will show below.<br />\n");
+		print("Please leave this window open during the installation.</p>\n");
+		print("<p>Note: Some packages may take a long time to install.</p>\n");
+		print("<div style=\"width: 400px; text-align: left;\">");
+
+		$index = 0;
+		foreach ($module as $item){
+			$index++;
+			$valid = false;
+			$error = false;
+			foreach ($items as $file_item)
+				if ($item == $file_item['Module'] . "=" . $file_item['NewVersion']){
+					$valid = true;
+					break;
+				}
+
+			if ($valid == true){
+				$temp = split("=", $item);
+				$package=$temp[0];
+				$version=$temp[1];
+
+				print("<div style=\"padding-bottom: 7px\">");
+				print("<strong>Installing  - " . $package . "(" . $version . ")</strong><br />\n");
+				print("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;");
+
+				if (preg_match("/openfiler/", $package)){
+					//delay this install as it will crash this script
+					$delayed .= " " . $item;
+					print("<font color=\"blue\">Delaying install of " . $item . "</font></div>\n");
+				}
+				else{
+					$cmd = "sudo " . $conary . " update  " . $item . " 2>&1";
+					ob_flush();flush();
+					unset($output);
+					$time1=time();
+					exec($cmd , $output, $retval);
+					$time2=time();
+					if ($retval == "0"){
+						print("<font color=\"green\"><b> successful</b></font>");
+						remove_item($conary_file, $package);
+					}
+					else{
+						if (preg_grep("/no new troves/", $output)){
+							print("<font color=\"green\"><b> already installed</b></font>");
+							remove_item($conary_file, $package);
+						}
+						else{
+							//error occured during install
+							$error=true;
+							print("<font color=\"red\"><b> error occured</b></font>");
+						}
+					}
+					print(" - elapsed time: " . strftime("%M:%S", $time2-$time1));
+					if (true){
+						print(" <a href=\"#\" onclick=\"toggleLayer('detail" . $index . "');return false;\">show/hide details</a></div>\n");
+						print("<div id=\"detail" . $index . "\" style=\"display: none;padding: 5px 15px 30px 30px\">");
+						foreach ($output as $line)
+							print($line . "<br />\n");
+						print("</div>");
+					}
+					else{
+						print("</div>\n");
+					}
+				}
+
+			}
+		}
+		if (!empty($delayed)){
+			//install delayed stuff, this needs to be forked or run in the background
+			print("<p><font color=red>The packages listed below need to be installed in the background. ");
+			print("Please do not restart the install until the log file shows completion.</font></p>\n");
+			print("<strong>Installing delayed packages</strong><br />\n");
+			foreach ( split(" ", $delayed) as $line)
+				if (!empty($line))
+					print("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" . $line . "<br />\n");
+
+			$fp = popen("export LANG=C; /usr/bin/sudo /usr/bin/at now", "w");
+			fputs($fp, $conary . " update " . $delayed . " > /dev/null 2>&1 \n");
+			pclose($fp);
+			unlink($conary_file);
+
+			print("</div>\n");
+			print("<p><a href=\"javascript: self.close()\">Close this Window</a></p>\n");
+			write_footer();
+		}
+
+		print("</div>");
+	}
+
+	if ($time_diff > $results_time_limit){
+		//time is up, rerun conary info
+		$run_conary_info = true;
+	}
+	else{
+		if ($last_retval != "0"){
+			if ($last_retval == ""){
+				if ($time_diff > $conary_time_limit){
+					//rerun the info
+					$run_conary_info = true;
+				}
+				else{
+					//conary should be running, wait for results
+
+					print("<p>Still waiting for installation list.<br>");
+					print("The installation list can take several minutes to compile</p>\n");
+
+					while (time() - $last_update < $conary_time_limit * 60){
+						if (file_exists($conary_file)){
+							$conary_fp = fopen($conary_file, "r");
+							fgets($conary_fp, 4096);
+							$last_retval = trim(preg_replace('/#.*/', '', fgets($conary_fp, 4096)));
+							fclose($conary_fp);
+						}
+						print(".");
+						ob_flush();flush();
+						if ($last_retval != "")
+							break;
+						sleep(1);
+					}
+					if ($last_retval!="0")
+						print("<p>This page will need to be refreshed to see the results</p>");
+				}
+			}
+			else{
+				//return value indicates a problem, rerun conary info
+				$run_conary_info = true;
+			}
+		}
+	}
+
+	if ($run_conary_info){
+		print("Please wait while the update list is compiled. This may take several minutes.<br />\n");
+		ob_flush();flush();
+		write_conary_info($conary_file);
+	}
+
+	$items = get_conary_info($conary_file);
+
+	if (isset($items)){
+		print("<form id=\"update\" name=\"update\" method=\"post\" action=\"system_update.html\">\n");
+		print("<br />\n");
+		print("<table width=\"80%\" cellpadding=\"3\" cellspacing=\"0\" ><tr>\n");
+		print("<td style=\"text-align: left; padding-bottom: 10px;\"><input type=\"checkbox\" name=\"updateall\" onClick=\"selectAll(this);\" /><strong>Update All Packages</strong>&nbsp;&nbsp;&nbsp;&nbsp;<input type=\"checkbox\" name=\"silent\" /><strong>Background Update</strong></td>\n");
+		print("<td style=\"text-align: right; padding-bottom: 10px;\">");
+		print("<input type=\"reset\" value=\"Clear All\" />&nbsp;&nbsp;&nbsp;");
+		print("<input type=\"submit\" name=\"submit\" value=\"Install Updates\" />");
+		print("</td>\n");
+		print("</tr></table>\n");
+		print("<table width=80% cellpadding=\"3\" cellspacing=\"0\" style=\"border: 1px solid rgb(180, 180, 180);\">\n");
+		print("\t<tr bgcolor=\"" . $GLOBALS["color_table_heading"] . "\">\n");
+		print("\t\t<td>&nbsp;</td>\n");
+		print("\t\t<td>Package</td>\n");
+		print("\t\t<td>Action</td>\n");
+		print("\t\t<td width=\"110\">Current Version</td>\n");
+		print("\t\t<td width=\"110\">New Version</td>\n");
+		print("\t</tr>\n");
+
+		$dcolor = 0;
+		$checked = array();
+		foreach ($items as $item){
+
+			$is_duplicate=false;
+			$is_update=false;
+			$old_version = "";
+			$components = "";
+
+			foreach ($checked as $check)
+				if ($check == $item['Module']){
+					$is_duplicate = true;
+					break;
+				}
+
+			if (!$is_duplicate){
+				$checked[]=$item['Module'];
+				foreach ($items as $item2){
+					if ($item['Module'] == $item2['Module']){
+						if ($item2['Operation'] == "Update"){
+							$is_update = true;
+							$old_version = $item2['OldVersion-short'];
+						}
+						if (!strpos($components, $item2['Components'])){
+							$components .= " " . $item2['Components'];
+						}
+					}
+				}
+				if ($dcolor == 0){
+					$dcolor = 1;
+					$dvalue = $GLOBALS["color_table_row1"];
+				}
+				else{
+					$dcolor = 0;
+					$dvalue = $GLOBALS["color_table_row2"];
+				}
+				print("\t<tr bgcolor=\"" . $dvalue . "\" >\n");
+				print("\t\t<td style=\"padding-right: 10px;\"><input type=\"checkbox\" name=\"module[]\" value=\"" . $item['Module'] . "=" . $item['NewVersion'] . "\" onClick=\"checkAll(this);\" /></td>\n");
+				print("\t\t<td style=\"padding-right: 30px;\">" . $item['Module']);
+				if (trim($components))
+					print(" (" . trim($components) . ")");
+				print("</td>\n");
+				print("\t\t<td style=\"padding-right: 10px;\">");
+				if ($is_update)
+					print("Update");
+				else
+					print("Install");
+				print("</td>\n");
+				if ($is_update)
+					print("\t\t<td style=\"padding-right: 30px;\">" . $old_version . "</td>\n");
+				else
+					print("\t\t<td>-</td>\n");
+				print("\t\t<td>" . $item['NewVersion-short'] . "</td>\n");
+				print("\t</tr>\n");
+			}
+		}
+		print("</table>\n");
+		print("<table cellpadding=10><tr>\n");
+		print("\t<td><input type=\"submit\" name=\"submit\" value=\"Install Updates\" /></td>\n");
+		print("\t<td><input type=\"reset\" value=\"Clear All\" /></td>\n");
+		print("</tr></table>\n");
+		print("</form>\n");
+	}
+	else{
+		//no more items in the update list
+		if ($last_retval == 0)
+			unlink($conary_file);
+	}
+	write_footer();
+?>

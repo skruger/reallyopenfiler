@@ -1,0 +1,462 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+    require("pre.inc");
+    include("authenticated.inc");
+    require("ietIscsi.inc");
+
+
+	if ((strlen($volume) <= 0) || (strlen($volume_vg) <= 0))
+	{
+            header("Location: ./volumes.html");
+            exit;
+	}
+
+
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+	$volumes_fstype = array();
+
+
+	function volumes_startelement($parser, $name, $attrs)
+	{
+            global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg, $volumes_fstype;
+
+
+            if ($name == "VOLUME")
+            {
+                array_push($volumes_id, $attrs["ID"]);
+                array_push($volumes_name, $attrs["NAME"]);
+                array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+                array_push($volumes_vg, $attrs["VG"]);
+                array_push($volumes_fstype, $attrs["FSTYPE"]);
+
+
+            }
+	}
+
+	function volumes_endelement($parser, $name)
+	{
+	}
+
+	$volumes_parser = xml_parser_create();
+	xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+	$volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+	while ($volumes_data = fread($volumes_fp, 4096))
+		xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+	fclose($volumes_fp);
+	xml_parser_free($volumes_parser);
+
+
+	$snapshots_id = array();
+	$snapshots_lvname = array();
+	$snapshots_vgname = array();
+	$snapshots_shared = array();
+	$snapshots_rotateid = array();
+
+	$schedule_size = array();
+	$schedule_share = array();
+	$schedule_timecounter = array();
+	$schedule_timemax = array();
+	$schedule_rotatecounter = array();
+	$schedule_rotatemax = array();
+	$schedule_lvname = array();
+	$schedule_vgname = array();
+
+	function snapshots_startelement($parser, $name, $attrs)
+	{
+            global $snapshots_id, $snapshots_lvname, $snapshots_vgname, $snapshots_shared, $snapshots_rotateid;
+            global $schedule_size, $schedule_share;
+            global $schedule_timecounter, $schedule_timemax;
+            global $schedule_rotatecounter, $schedule_rotatemax;
+            global $schedule_lvname, $schedule_vgname;
+
+            if ($name == "SNAPSHOT")
+            {
+                array_push($snapshots_id, $attrs["ID"]);
+                array_push($snapshots_lvname, $attrs["LVNAME"]);
+                array_push($snapshots_vgname, $attrs["VGNAME"]);
+                array_push($snapshots_shared, $attrs["SHARED"]);
+                array_push($snapshots_rotateid, $attrs["ROTATEID"]);
+            }
+            else if ($name == "SCHEDULE")
+            {
+                array_push($schedule_size, $attrs["SIZE"]);
+                array_push($schedule_share, $attrs["SHARE"]);
+                array_push($schedule_timecounter, $attrs["TIMECOUNTER"]);
+                array_push($schedule_timemax, $attrs["TIMEMAX"]);
+                array_push($schedule_rotatecounter, $attrs["ROTATECOUNTER"]);
+                array_push($schedule_rotatemax, $attrs["ROTATEMAX"]);
+                array_push($schedule_lvname, $attrs["LVNAME"]);
+                array_push($schedule_vgname, $attrs["VGNAME"]);
+            }
+	}
+
+	function snapshots_endelement($parser, $name)
+	{
+	}
+
+	$snapshots_parser = xml_parser_create();
+	xml_set_element_handler($snapshots_parser, "snapshots_startelement", "snapshots_endelement");
+	$snapshots_fp = fopen("/opt/openfiler/etc/snapshots.xml", "r");
+
+	while ($snapshots_data = fread($snapshots_fp, 4096))
+		xml_parse($snapshots_parser, $snapshots_data, feof($snapshots_fp));
+
+	fclose($snapshots_fp);
+	xml_parser_free($snapshots_parser);
+
+
+	$vn = 0;
+	while (($vn < count($volumes_id)) && (($volumes_id[$vn] != $volume) || ($volumes_vg[$vn] != $volume_vg)))
+		$vn++;
+
+	if ($vn >= count($volumes_id))
+	{
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+
+	$snapshots_exist = false;
+
+	for ($d = 0; $d < count($snapshots_id); $d++)
+	{
+            if (($snapshots_lvname[$d] == $volume) && ($snapshots_vgname[$d] == $volume_vg))
+            {
+                    $snapshots_exist = true;
+                    break;
+            }
+	}
+
+	if (!$snapshots_exist)
+	{
+            for ($d = 0; $d < count($schedule_lvname); $d++)
+            {
+                    if (($schedule_lvname[$d] == $volume) && ($schedule_vgname[$d] == $volume_vg))
+                    {
+                            $snapshots_exist = true;
+                            break;
+                    }
+            }
+	}
+
+	$fstype = "";
+
+	for ($i = 0; $i < count($volumes_id); $i++)
+            if (($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg))
+            {
+                    $fstype = $volumes_fstype[$i];
+                    break;
+            }
+
+	$lvname = "/dev/" . $volume_vg . "/" . $volume;
+
+        $lvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvdisplay -c " . escapeshellarg($lvname), "r");
+        $i = 0;
+        while (!feof($lvp))
+        	$lvs[$i++] = fgets($lvp, 4096);
+        pclose($lvp);
+
+        $lvinfo = explode(":", trim($lvs[0], " "));
+        $lvsize_mb = intval(round($lvinfo[6] / 2048));
+        $lvsize = $lvsize_mb * 1024 * 1024;
+
+	if ($lvsize > (1024 * 1024 * 1024))
+		$lvsize_string = sprintf("%.02f GB", ($lvsize / (1024 * 1024 * 1024.0)));
+	else if ($lvsize > (1024 * 1024))
+		$lvsize_string = sprintf("%.02f MB", ($lvsize / (1024 * 1024.0)));
+	else if ($lvsize > (1024))
+		$lvsize_string = sprintf("%.02f KB", ($lvsize / (1024.0)));
+	else
+		$lvsize_string = $lvsize . " bytes";
+
+
+	if ( $action == "setname")
+	{
+		if (strlen($_POST["newvolumename"]) <= 0)
+			$newvolumename = $volume;
+
+		$volume = strtolower($volume);
+
+		$volumesp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/volumes.xml", "w");
+		fputs($volumesp, "<?xml version=\"1.0\" ?>\n");
+		fputs($volumesp, "<volumes>\n");
+
+		for ($i = 0; $i < count($volumes_id); $i++)
+		{
+
+			if (($volumes_id[$i] != $volume) || ($volumes_vg[$i] != $volume_vg))
+			{
+                            fputs($volumesp, "\t<volume id=\"" . htmlentities($volumes_id[$i]) . "\" name=\"" . htmlentities($volumes_name[$i]) .
+                                  "\" mountpoint=\"" . htmlentities($volumes_mountpoint[$i]) . "\" vg=\"" . htmlentities($volumes_vg[$i]) . "\" fstype=\"" .
+                                  htmlentities($volumes_fstype[$i]) . "\" />\n");
+
+
+			}
+			else
+			{
+			    fputs($volumesp, "\t<volume id=\"" . htmlentities($volumes_id[$i]) . "\" name=\"" . htmlentities($newvolumename) .
+                                  "\" mountpoint=\"" . htmlentities($newmountpoint) . "\" vg=\"" . htmlentities($volumes_vg[$i]) . "\" fstype=\"" .
+                                  htmlentities($volumes_fstype[$i]) . "\" />\n");
+
+			}
+
+		}
+
+		fputs($volumesp, "</volumes>\n");
+		pclose($volumesp);
+
+		function resizeCommand($fstype)
+		{
+			global $fs_info;
+			$fs = 0;
+			$fsfound = false;
+
+			for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+			{
+				if ($fs_info[$fsi]["type"] == $fstype)
+				{
+					$fs = $fsi;
+					$fsfound = true;
+					break;
+				}
+			}
+			if ($fsfound == false)
+				$fs = 0;
+			return $fs_info[$fs]["resize_command"];
+		}
+
+		$newvolumesize = intval($_POST["newvolumesize"]);
+
+		if ($_POST['edit'] != "Cancel")
+                    if ((!$snapshots_exist) &&  ($newvolumesize > $lvsize_mb)) {
+
+                        if (($fstype != "jfs" && $fstype != "iscsi")) {
+
+                            exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvresize -L" . $newvolumesize . "M " . escapeshellarg($lvname));
+                            exec("export LANG=C; /usr/bin/sudo " . resizeCommand($fstype) . " " . escapeshellarg($lvname) . " 2>&1");
+
+                        }
+
+                        if ($fstype == "iscsi") {
+
+                            $ietObj = new IetIscsi();
+                            $ietObj->resizeIscsiVolume($lvname, $newvolumesize);
+                        }
+                    }
+
+
+
+
+
+		header("Location: ./volumes_edit.html?volume=" . $volume . "&volume_vg=" . $volume_vg);
+		exit;
+	}
+
+	else if (($_POST["edit"] == "Cancel") || ($_POST["editchap"] == "Cancel"))
+	{
+            header("Location: ./volumes.html");
+            exit;
+	}
+
+	generic_header(array("title" => _("Volumes : Edit Volume")));
+	single_begin(array());
+
+
+?>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+
+function lvsize_onchange()
+{
+    if (parseInt(document.lvform.newvolumesize.value) < <?php print($lvsize_mb); ?>)
+            document.lvform.newvolumesize.value = <?php print($lvsize_mb); ?>;
+}
+
+// -->
+</script>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_VOLUME_EXISTING");
+
+	$vgp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "vgdisplay -c " . htmlentities($volume_vg) , "r");
+	$i = 0;
+	while (!feof($vgp))
+		$vgds[$i++] = fgets($vgp, 4096);
+	pclose($vgp);
+
+
+	for ($i = 0; $i < count($vgds); $i++)
+	{
+            $vginfo = explode(":", trim($vgds[$i], " "));
+
+            if ($vginfo[0] != $volume_vg)
+                    continue;
+
+            if ($vginfo[11] <= 0)
+                    break;
+
+            print("<h3 align=\"center\">Block storage statistics for volume group \"" . htmlentities($volume_vg) . "\"</h3>\n");
+            print("<div align=\"center\">\n");
+            print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+            print("<tr>\n");
+            print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Total Space</strong></td>\n");
+            print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Used Space</strong></td>\n");
+            print("\t<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Free Space</strong></td>\n");
+            print("</tr>\n");
+            print("<tr>\n");
+            print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\" valign=\"middle\">" . $vginfo[11] . " bytes (" . ($vginfo[11] / 1024) . " MB)</td>\n");
+            print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\" valign=\"middle\">" . ($vginfo[14] * ($vginfo[12])) . " bytes (" . (($vginfo[14] * ($vginfo[12])) / (1024)) . " MB)</td>\n");
+            print("\t<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\" valign=\"middle\">" . ($vginfo[15] * ($vginfo[12])) . " bytes (" . (($vginfo[15] * ($vginfo[12])) / (1024)) . " MB)</td>\n");
+            print("</tr>\n");
+            print("</table>\n");
+            print("</div>\n");
+
+            $jsondata_size = array();
+            $jsondata_label = array();
+
+
+            $usedspace = (($vginfo[14] * ($vginfo[12])) / (1024));
+            $freespace = (($vginfo[15] * ($vginfo[12])) / (1024));
+
+
+            array_push($jsondata_size, $usedspace);
+            array_push($jsondata_size, $freespace);
+
+
+            array_push($jsondata_label, "Used");
+            array_push($jsondata_label, "Free");
+
+            print("<div><canvas id=\"graph\" height=\"200\" width=\"200\"></canvas></div>\n"); ?>
+            <script src="/js/rendervolumegraph.js" type="text/javascript" language="JavaScript"></script>
+            <script type="text/javascript">
+                var jsondata_size = <?php print(json_encode($jsondata_size) . ";\n"); ?>
+                var jsondata_label = <?php print(json_encode($jsondata_label) . ";\n"); ?>
+                drawGraph(jsondata_size, jsondata_label);
+            </script>
+            <?php
+            break;
+	}
+
+	print("<h3 align=\"center\">Edit properties of volume \"" . $volume . "\"</h3>\n");
+
+
+	print("<form name=\"lvform\" action=\"volumes_edit.html\" method=\"post\">\n");
+	print("<input type=\"hidden\" name=\"volume\" value=\"" . htmlentities($volume) . "\" />\n");
+	print("<input type=\"hidden\" name=\"volume_vg\" value=\"" . htmlentities($volume_vg) . "\" />\n");
+	print("<input type=\"hidden\" name=\"newmountpoint\" value=\"" . htmlentities($volumes_mountpoint[$vn]) . "\" />\n");
+	print("<input type=\"hidden\" name=\"action\" value=\"setname\" />\n");
+	print("<div align=\"center\">\n");
+	print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\"><strong>Current volume description</strong></td>\n");
+	print("\t<td class=\"color_table_row1\">" . htmlentities($volumes_name[$vn]) . "</td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\"><strong>New volume description</strong></td>\n");
+	print("\t<td class=\"color_table_row1\"><input type=\"text\" name=\"newvolumename\" value=\"" . htmlentities($volumes_name[$vn]) . "\" /></td>\n");
+	print("</tr>\n");
+	print("<tr>\n");
+	print("\t<td class=\"color_table_heading\"><strong>Current volume size</strong></td>\n");
+	print("\t<td class=\"color_table_row1\">" . htmlentities($lvsize_string) . "</td>\n");
+	print("</tr>\n");
+
+	if ($snapshots_exist || $fstype == "jfs")
+	{
+            print("<tr>\n");
+            print("\t<td class=\"color_table_alert\" colspan=\"2\"><strong>Can't resize this volume as snapshots exist or the volume type does not support resizing</strong></td>\n");
+            print("</tr>\n");
+	}
+	else
+	{
+            print("<tr>\n");
+            print("\t<td class=\"color_table_heading\"><strong>New volume size in MB<br />(must be larger than, or equal to,  " . $lvsize_mb . "MB)</strong></td>\n");
+
+            if($lvsize_mb < ($lvsize_mb + $vginfo[15] * ($vginfo[12] / 1024))  )
+            {
+                    $isfull = FALSE;
+                    print("\t<td class=\"color_table_row1\"><input type=\"text\" id=\"newvolumesize\" name=\"newvolumesize\" onchange=\"lvsize_onchange()\" value=\"" . htmlentities($lvsize_mb) . "\" /><div class=\"slider\" id=\"slider-$vginfo[0]\"><input class=\"slider-input\" id=\"slider-input-$vginfo[0]\"/></div></td>\n");
+            }
+            else
+            {
+                    $isfull = TRUE;
+                    print("\t<td class=\"color_table_alert\">No free space in Volume Group.<br/> Please increase the size of the volume <br/> group by adding  new physical volumes or <br/> delete non-essential logical volumes <br/> from the <b>"  . $volume_vg . "</b> volume group! </td>\n" );
+
+            }
+
+            print("</tr>\n");
+	}
+
+	print("<tr>\n");
+	print("\t<td  colspan=\"2\" align=\"center\"><input type=\"submit\" name=\"edit\" value=\"Change\" /> &nbsp; <input type=\"submit\" name=\"edit\" value=\"Cancel\" /></td>\n");
+	print("</tr>\n");
+	print("</table>\n");
+	print("</div>\n");
+
+	if ((!($snapshots_exist )) && !$isfull) // suppress javascript errors resulting from slider
+	{
+            print("\t<script type=\"text/javascript\">\n");
+            print("\t\t var s_$vginfo[0] = new Slider(document.getElementById('slider-$vginfo[0]'), document.getElementById('slider-input-$vginfo[0]'));\n");
+            print("\t\t s_$vginfo[0].onchange = function () {\n");
+            print("\t\t\t document.getElementById('newvolumesize').value = s_$vginfo[0].getValue()\n");
+            print("\t\t\t s_$vginfo[0].setMaximum(parseInt($lvsize_mb + $vginfo[15] * ($vginfo[12] / 1024)))\n");
+            print("\t\t\t s_$vginfo[0].setMinimum(parseInt($lvsize_mb))\n");
+            print("\t\t };\n");
+            print("\t\t s_$vginfo[0].setValue($lvsize_mb);\n");
+            print("\t\t window.onresize = function () {\n");
+            print("\t\t\t s_$vginfo[0].recalculate();\n");
+            print("\t\t };\n");
+            print("\t </script>\n\n");
+	}
+
+	print("</form>\n");
+
+
+?>
+
+<?php
+
+
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

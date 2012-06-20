@@ -1,0 +1,848 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+	require_once("pre.inc");
+    include("authenticated.inc");
+	require_once("ietIscsi.inc");
+
+
+	/* create IetIscsi object */
+	$ietObj = NULL;
+	$service_iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+	if ($service_iscsi)
+		$ietObj = new IetIscsi();
+
+	if ($vgname)
+		setcookie("vg-name", $vgname);
+	else
+		$vgname = $_COOKIE['vg-name'];
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+	$volumes_fstype = array();
+
+	function volumes_startelement($parser, $name, $attrs)
+	{
+		global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg, $volumes_fstype;
+
+		if ($name == "VOLUME")
+		{
+			array_push($volumes_id, $attrs["ID"]);
+			array_push($volumes_name, $attrs["NAME"]);
+			array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+			array_push($volumes_vg, $attrs["VG"]);
+			array_push($volumes_fstype, $attrs["FSTYPE"]);
+		}
+	}
+
+	function volumes_endelement($parser, $name)
+	{
+	}
+
+	$volumes_parser = xml_parser_create();
+	xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+	$volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+	while ($volumes_data = fread($volumes_fp, 4096))
+		xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+	fclose($volumes_fp);
+	xml_parser_free($volumes_parser);
+
+	$vgp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "vgdisplay -c", "r");
+	$i = 0;
+	while (!feof($vgp))
+		$vgds[$i++] = fgets($vgp, 4096);
+	pclose($vgp);
+
+	if (($i == 0) || (($i == 1) && (strlen($vgds[0]) == 0)))
+	{
+		header("Location: ./volumes_vgmanage.html");
+		exit;
+	}
+
+	if (strlen($vgname) <= 0)
+	{
+		$vginfo = explode(":", trim($vgds[0], " "));
+		$vgname = $vginfo[0];
+	}
+
+	$snapshots_id = array();
+	$snapshots_lvname = array();
+	$snapshots_vgname = array();
+	$snapshots_shared = array();
+	$snapshots_rotateid = array();
+
+	$schedule_size = array();
+	$schedule_share = array();
+	$schedule_timecounter = array();
+	$schedule_timemax = array();
+	$schedule_rotatecounter = array();
+	$schedule_rotatemax = array();
+	$schedule_lvname = array();
+	$schedule_vgname = array();
+
+	function snapshots_startelement($parser, $name, $attrs)
+	{
+		global $snapshots_id, $snapshots_lvname, $snapshots_vgname, $snapshots_shared, $snapshots_rotateid;
+		global $schedule_size, $schedule_share;
+		global $schedule_timecounter, $schedule_timemax;
+		global $schedule_rotatecounter, $schedule_rotatemax;
+		global $schedule_lvname, $schedule_vgname;
+
+		if ($name == "SNAPSHOT")
+		{
+			array_push($snapshots_id, $attrs["ID"]);
+			array_push($snapshots_lvname, $attrs["LVNAME"]);
+			array_push($snapshots_vgname, $attrs["VGNAME"]);
+			array_push($snapshots_shared, $attrs["SHARED"]);
+			array_push($snapshots_rotateid, $attrs["ROTATEID"]);
+		}
+		else if ($name == "SCHEDULE")
+		{
+			array_push($schedule_size, $attrs["SIZE"]);
+			array_push($schedule_share, $attrs["SHARE"]);
+			array_push($schedule_timecounter, $attrs["TIMECOUNTER"]);
+			array_push($schedule_timemax, $attrs["TIMEMAX"]);
+			array_push($schedule_rotatecounter, $attrs["ROTATECOUNTER"]);
+			array_push($schedule_rotatemax, $attrs["ROTATEMAX"]);
+			array_push($schedule_lvname, $attrs["LVNAME"]);
+			array_push($schedule_vgname, $attrs["VGNAME"]);
+		}
+	}
+
+	function snapshots_endelement($parser, $name)
+	{
+	}
+
+	$snapshots_parser = xml_parser_create();
+	xml_set_element_handler($snapshots_parser, "snapshots_startelement", "snapshots_endelement");
+	$snapshots_fp = fopen("/opt/openfiler/etc/snapshots.xml", "r");
+
+	while ($snapshots_data = fread($snapshots_fp, 4096))
+		xml_parse($snapshots_parser, $snapshots_data, feof($snapshots_fp));
+
+	fclose($snapshots_fp);
+	xml_parser_free($snapshots_parser);
+
+	$piecolors[0] = "#a2e54b";
+	$piecolors[1] = "#ff5d35";
+	$piecolors[2] = "#ddddee";
+	$piecolors[3] = "#00ffff";
+	$piecolors[4] = "#00ff00";
+	$piecolors[5] = "#ff00ff";
+	$piecolors[6] = "#7f0000";
+	$piecolors[7] = "#7f007f";
+	$piecolors[8] = "#00007f";
+	$piecolors[9] = "#007f7f";
+	$piecolors[10] = "#007f00";
+	$piecolors[11] = "#827f00";
+	$piecolors[12] = "#000000";
+	$piecolors[13] = "#191919";
+	$piecolors[14] = "#333333";
+	$piecolors[15] = "#767676";
+
+	global $cluster_enabled, $cluster_nodename, $cluster_resource;
+
+	$cluster_enabled = false;
+	$cluster_nodename = "";
+	$cluster_resource = array();
+
+	function cluster_startelement($parser, $name, $attrs)
+	{
+		global $cluster_enabled, $cluster_nodename, $cluster_resource;
+
+		if ($name == "CLUSTERING")
+		{
+			if ($attrs["STATE"] == "on")
+				$cluster_enabled = true;
+			else
+				$cluster_enabled = false;
+		}
+		else if ($name == "NODENAME")
+			$cluster_nodename = $attrs["VALUE"];
+		else if ($name == "RESOURCE")
+			array_push($cluster_resource, $attrs["VALUE"]);
+	}
+
+	function cluster_endelement($parser, $name)
+	{
+	}
+
+	$cluster_parser = xml_parser_create();
+	xml_set_element_handler($cluster_parser, "cluster_startelement", "cluster_endelement");
+	$cluster_fp = fopen("/opt/openfiler/etc/cluster.xml", "r");
+
+	while ($cluster_data = fread($cluster_fp, 4096))
+		xml_parse($cluster_parser, $cluster_data, feof($cluster_fp));
+
+	fclose($cluster_fp);
+	xml_parser_free($cluster_parser);
+
+
+	if (!$cluster_enabled)
+	{
+		$fstabp = popen("export LANG=C; /usr/bin/sudo /bin/cat /etc/fstab", "r");
+		$i = 0;
+		while (!feof($fstabp))
+		{
+			$j = 0;
+
+			$fstabstr = trim(fgets($fstabp, 4096));
+
+			if (strlen($fstabstr) <= 0)
+				continue;
+
+			if (substr($fstabstr, 0, 1) == "#")
+				continue;
+
+			$foo = explode(" ", $fstabstr);
+
+			foreach ($foo as $fresultitem)
+			{
+				$fresultitem = trim($fresultitem);
+				if (strlen($fresultitem) > 0)
+				{
+					$fstab[$i][$j] = $fresultitem;
+					$j++;
+				}
+			}
+
+			$i++;
+		}
+
+		$fstabcount = $i;
+
+		pclose($fstabp);
+	}
+
+	$dfp = popen("export LANG=C; /usr/bin/sudo /bin/df -P -h -l", "r");
+	$dfstr = trim(fgets($dfp, 4096)); // Skip table header
+    $i = 0;
+
+	while (!feof($dfp))
+	{
+		$j = 0;
+
+		$dfstr = trim(fgets($dfp, 4096));
+
+		if (strlen($dfstr) <= 0)
+			continue;
+
+		$foo = explode(" ", $dfstr);
+
+		foreach ($foo as $fresultitem)
+		{
+			$fresultitem = trim($fresultitem);
+			if (strlen($fresultitem) > 0)
+			{
+				$df[$i][$j] = $fresultitem;
+				$j++;
+			}
+		}
+
+		$i++;
+	}
+
+	$dfcount = $i;
+
+    pclose($dfp);
+
+
+
+	if (($action == "Delete") && (strlen(trim($volume)) > 0))
+	{
+		$volume = strtolower($volume);
+        
+        /*  If any snapshots exist for this volume, do not allow operation to continue */
+
+		for ($i = 0; $i < count($snapshots_id); $i++)
+		{
+			if (($snapshots_lvname[$i] == $volume) && ($snapshots_vgname[$i] == $volume_vg))
+			{
+				header("Location: ./volumes.html");
+				exit;
+			}
+		}
+
+		for ($i = 0; $i < count($volumes_id); $i++)
+			if (($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg))
+            
+            {
+			    $fstype = $volumes_fstype[$i];
+			    break;
+                
+            }
+            
+        $volumesp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/volumes.xml", "w");
+        fputs($volumesp, "<?xml version=\"1.0\" ?>\n");
+        fputs($volumesp, "<volumes>\n");
+        for ($i = 0; $i < count($volumes_id); $i++)
+	        if (($volumes_id[$i] != $volume) || ($volumes_vg[$i] != $volume_vg))
+                fputs($volumesp, "\t<volume id=\"" . 
+                htmlentities($volumes_id[$i]) . "\" name=\"" . 
+                htmlentities($volumes_name[$i]) . "\" mountpoint=\"" . 
+                htmlentities($volumes_mountpoint[$i]) . "\" vg=\"" . 
+                $volumes_vg[$i] . "\" fstype=\"" . $volumes_fstype[$i] . "\" />\n");
+
+		fputs($volumesp, "</volumes>\n");
+		pclose($volumesp);
+
+		if (!$cluster_enabled)
+		{
+			if ($fstype != "iscsi")
+			{
+				$fstabp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/fstab", "w");
+
+				for ($i = 0; $i < $fstabcount; $i++)
+				{
+					$str = "";
+
+					if ($fstab[$i][0] == "/dev/" . $volume_vg . "/" . $volume)
+						continue;
+
+					for ($j = 0; $j < count($fstab[$i]); $j++)
+					{
+						if ($j > 0)
+							$str .= " ";
+						$str .= $fstab[$i][$j];
+					}
+
+					fputs($fstabp, ($str . "\n"));
+				}
+
+				pclose($fstabp);
+			}
+		}
+		else
+		{
+            $service_winbind = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service winbind status"), "running") ? 1 : 0);
+            $service_smb = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service smb status"), "running") ? 1 : 0);
+            $service_nfsv3 = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service nfs status"), "running") ? 1 : 0);
+            $service_http = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service httpd status"), "running") ? 1 : 0);
+            $service_ftp = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd status"), "running") ? 1 : 0);
+            $service_rsync = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service rsync status"), "running") ? 1 : 0);
+			$service_iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+
+			$clusterp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/ha.d/haresources", "w");
+
+			$cluster_resource_str = "";
+
+			for ($i = 0; $i < count($cluster_resource); $i++)
+				$cluster_resource_str .= " " . $cluster_resource[$i];
+
+			for ($i = 0; $i < count($volumes_id); $i++)
+			{
+				if (($volumes_id[$i] != $volume) || ($volumes_vg[$i] != $volume_vg))
+				{
+					$fstype = $volumes_fstype[$i];
+
+					if ($fstype != "iscsi")
+					{
+						$fs = 0;
+						$fsfound = false;
+
+						for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+						{
+							if ($fs_info[$fsi]["type"] == $fstype)
+							{
+								$fs = $fsi;
+								$fsfound = true;
+								break;
+							}
+						}
+
+						if ($fsfound == false)
+							$fs = 0;
+
+						$cluster_resource_str .= " Filesystem::/dev/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . "/mnt/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["mount_options"];
+					}
+				}
+			}
+
+			for ($i = 0; $i < count($snapshots_id); $i++)
+			{
+				if (($snapshots_lvname[$i] != $volume) || ($snapshots_vgname[$i] != $volume_vg))
+				{
+					$fstype = "";
+
+					for ($fsj = 0; $fsj < count($volumes_id); $fsj++)
+					{
+						if (($snapshots_vgname[$i] == $volumes_vg[$fsj]) && ($snapshots_lvname[$i] == $volumes_id[$fsj]))
+						{
+							$fstype = $volumes_fstype[$fsj];
+							break;
+						}
+					}
+
+					if ($fstype != "iscsi")
+					{
+						$fs = 0;
+						$fsfound = false;
+
+						for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+						{
+							if ($fs_info[$fsi]["type"] == $fstype)
+							{
+								$fs = $fsi;
+								$fsfound = true;
+								break;
+							}
+						}
+
+						if ($fsfound == false)
+							$fs = 0;
+
+						$cluster_resource_str .= " Filesystem::/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i] . "::" . "/mnt/snapshots/" . $snapshots_vgname[$i] . "/" . $snapshots_lvname[$i] . "/" . $snapshots_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["snapshot_mount_options"];
+					}
+				}
+			}
+
+            if ($service_winbind > 0)
+			    $cluster_resource_str .= " winbind";
+			if ($service_http > 0)
+			    $cluster_resource_str .= " httpd";
+			if ($service_nfsv3 > 0)
+			    $cluster_resource_str .= " nfs";
+            if ($service_smb > 0)
+                $cluster_resource_str .= " smb";
+			if ($service_ftp > 0)
+                $cluster_resource_str .= " proftpd";
+            if ($service_rsync > 0)
+                $cluster_resource_str .= " rsync";
+			if ($service_iscsi > 0)
+                $cluster_resource_str .= " iscsi-target";
+                
+            $cluster_resource_str .= " openfiler";
+
+			fputs($clusterp, $cluster_nodename . $cluster_resource_str . "\n");
+			pclose($clusterp);
+		}
+
+		for ($i = 0; $i < count($volumes_id); $i++)
+			if (($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg))
+			{
+				$fstype = $volumes_fstype[$i];
+				break;
+			}
+
+		if ($fstype != "iscsi")
+		{
+
+			// TODO: be less draconian, find out what is holding the fs open and kill it.
+
+			if ($fstype == "ext3")
+				apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+			else
+				apply_configuration(array("services" => "restart", "chmod" => "no", "chmod_path" => ""));
+
+			exec("export LANG=C; /usr/bin/sudo /bin/umount -f /dev/" . escapeshellarg($volume_vg) . "/" . escapeshellarg($volume), $umount_output, $umount_result);
+
+			if ($umount_result == 0)
+				exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvremove -f /dev/" . escapeshellarg($volume_vg) . "/" . escapeshellarg($volume));
+
+		}
+		else
+		{
+			exec("export LANG=C; /usr/bin/sudo rm -f /opt/openfiler/etc/iscsi/" . escapeshellarg($volume_vg) . "/" . escapeshellarg($volume) . ".xml");
+
+			apply_configuration(array("services" => "keep", "chmod" => "no", "chmod_path" => ""));
+
+			$service_iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+
+			if ($service_iscsi)
+				exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target restart");
+
+			exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvremove -f /dev/" . escapeshellarg($volume_vg) . "/" . escapeshellarg($volume));
+		}
+
+		for ($i = 0; $i < count($volumes_id); $i++)
+			if (($volumes_id[$i] == $volume) && ($volumes_vg[$i] == $volume_vg))
+				exec("export LANG=C; /usr/bin/sudo /bin/rmdir --ignore-fail-on-non-empty " . escapeshellarg($volumes_mountpoint[$i]));
+
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+	generic_header(array("title" => _("Volumes : Manage Volumes")));
+	single_begin(array());
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+
+<p>&nbsp;</p>
+
+<?php
+
+        nested_tab_begin("C_VOLUME_EXISTING");
+?>
+	<h3 align="center">Select Volume Group</h3>
+
+	<?php printMessageBlock("info", "<p>Please select a volume group to display.</p>"); ?>
+
+	<form action="volumes.html" method="get">
+	<p align="center">
+	<select name="vgname">
+<?php
+	for ($i = 0; $i < count($vgds); $i++)
+	{
+		$vginfo = explode(":", trim($vgds[$i], " "));
+
+		if ($vginfo[11] <= 0)
+			break;
+
+                if (!preg_match("/^VG_XenStorage[-][a-zA-Z0-9]{8}[-][a-zA-Z0-9]{4}[-][a-zA-Z0-9]{4}[-][a-zA-Z0-9]{4}[-][a-zA-Z0-9]{9}/",$vginfo[0])) // don't list xensource-created volume groups
+                    print("\t\t<option" . (($vginfo[0] == $vgname) ? " selected=\"selected\"" : "") . " value=\"" . htmlentities($vginfo[0]) . "\">" . htmlentities($vginfo[0]) . "</option>\n");
+	}
+?>
+	</select>&nbsp;<input type="submit" value="Change" />
+	</p>
+	</form>
+
+	<p>&nbsp;</p>
+
+	<hr />
+<?php
+	for ($ii = 0; $ii < count($vgds); $ii++)
+	{
+		$vginfo = explode(":", trim($vgds[$ii], " "));
+
+		if ($vginfo[11] <= 0)
+			continue;
+
+		if ($vginfo[0] != $vgname)
+			continue;
+
+		print("<a name=\"vg-" . htmlentities($vginfo[0]) . "\"></a>\n");
+		print("<h3 align=\"center\">Volumes in volume group \"" . htmlentities($vginfo[0]) . "\" (" . ($vginfo[11] / 1024) . " MB)</h3>\n");
+
+		$volumes_found = false;
+
+		for ($j = 0; $j < count($volumes_id); $j++)
+		{
+			if ($volumes_vg[$j] == $vginfo[0])
+			{
+				$volumes_found = true;
+				break;
+			}
+		}
+
+		if ($volumes_found)
+		{
+			print("<div align=\"center\">\n");
+
+			$keyvaluestring = "";
+                        $jsondata_size = array();
+                        $jsondata_label = array();
+			for ($j = 0; $j < count($volumes_id); $j++)
+			{
+				if ($volumes_vg[$j] != $vginfo[0])
+					continue;
+
+				$lvname = "/dev/" . $vginfo[0] . "/" . $volumes_id[$j];
+
+				$lvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvdisplay -c " . escapeshellarg($lvname), "r");
+				$i = 0;
+				while (!feof($lvp))
+					$lvs[$i++] = fgets($lvp, 4096);
+				pclose($lvp);
+
+				$lvinfo = explode(":", trim($lvs[0], " "));
+				$size = $lvinfo[6] / 2;
+
+				$keyvaluestring .= "&amp;value" . $j . "=" . $size;
+
+                                array_push($jsondata_size, $size/1024);
+                                array_push($jsondata_label, $volumes_id[$j]);
+			}
+
+
+
+			$snapshots_size = 0;
+
+			for ($d = 0; $d < count($snapshots_id); $d++)
+			{
+				if ($snapshots_vgname[$d] != $vginfo[0])
+					continue;
+
+				if ($GLOBALS["lvm_version"] == 1)
+					$snapshot_dev = "/dev/" . $snapshots_vgname[$d] . "/of.snapshot." . $snapshots_lvname[$d] . "." . $snapshots_id[$d];
+				else
+					$snapshot_dev = "/dev/mapper/" . $snapshots_vgname[$d] . "-of.snapshot." . $snapshots_lvname[$d] . "." . $snapshots_id[$d];
+
+				$snapshot_symlink_dev = "/dev/" . $snapshots_vgname[$d] . "/of.snapshot." . $snapshots_lvname[$d] . "." . $snapshots_id[$d];
+
+				if (!file_exists($snapshot_dev))
+					continue;
+
+				$lvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvdisplay -c " . $snapshot_symlink_dev, "r");
+				$j = 0;
+				while (!feof($lvp))
+					$lvs[$j++] = fgets($lvp, 4096);
+				pclose($lvp);
+
+				$snapshot_info = explode(":", trim($lvs[0], " "));
+				$snapshots_size += ($snapshot_info[6] / 2);
+			}
+
+
+
+                        array_push($jsondata_size, $snapshots_size/1024);
+                        array_push($jsondata_size, (($vginfo[15] * ($vginfo[12])) / (1024.0)));
+                        array_push($jsondata_label, "Snapshots");
+                        array_push($jsondata_label, "Free");
+
+
+
+			$keyvaluestring .= "&amp;value" . count($volumes_id) . "=" . $snapshots_size;
+
+
+
+			/*print("<img src=\"volume_pie.php?phi=25&amp;width=210&amp;height=210&amp;scale=3&amp;count=" .
+                              (count($volumes_id) + 2) . $keyvaluestring . "&amp;value" . (count($volumes_id) + 1) .
+                              "=" . (($vginfo[15] * ($vginfo[12]))) . "\" alt=\"Usage pie chart for volume group `" . $vginfo[0] . "'\" />\n");*/
+			print("</div>\n");
+
+                        print("<div><canvas id=\"graph\" height=\"300\" width=\"300\"></canvas></div>\n"); ?>
+                        <script src="/js/rendervolumegraph.js" type="text/javascript" language="JavaScript"></script>
+                        <script type="text/javascript">
+                            var jsondata_size = <?php print(json_encode($jsondata_size) . ";\n"); ?>
+                            var jsondata_label = <?php print(json_encode($jsondata_label) . ";\n"); ?>
+                            drawGraph(jsondata_size, jsondata_label);
+                        </script>
+                        <?php
+			print("<div align=\"center\">\n");
+			print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+			print("<tr>\n");
+			/*print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\" valign=\"middle\"><strong>Legend</strong></td>\n"); */
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\" valign=\"middle\"><strong>Volume name</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\" valign=\"middle\"><strong>Volume description</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Volume size</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>File system type</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>File system size</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>FS used space</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>FS free space</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Delete</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Properties</strong></td>\n");
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Snapshots</strong></td>\n");
+			print("</tr>\n");
+
+			$dcolor = 0;
+
+			$usedsize = (($vginfo[14] * ($vginfo[12])) / 1024);
+			$totalsize = ($vginfo[11] / 1024);
+			$freesize = $totalsize - $usedsize;
+
+			for ($j = 0; $j < count($volumes_id); $j++)
+			{
+				if ($volumes_vg[$j] != $vginfo[0])
+					continue;
+
+				if ($dcolor == 0)
+				{
+					$dcolor = 1;
+					$dvalue = $GLOBALS["color_table_row1"];
+				}
+				else
+				{
+					$dcolor = 0;
+					$dvalue = $GLOBALS["color_table_row2"];
+				}
+
+				$lvname = "/dev/" . $vginfo[0] . "/" . $volumes_id[$j];
+
+				$lvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvdisplay -c " . escapeshellarg($lvname), "r");
+				$i = 0;
+				while (!feof($lvp))
+					$lvs[$i++] = fgets($lvp, 4096);
+				pclose($lvp);
+
+				$lvinfo = explode(":", trim($lvs[0], " "));
+				$size = $lvinfo[6] / (1024 * 2);
+
+				$rand_id = sha1($volumes_vg[$j] . $volumes_id[$j] . rand());
+
+				$fs_size = "Not available";
+				$fs_used = "Not available";
+				$fs_free = "Not available";
+
+				for ($d = 0; $d < count($df); $d++)
+				{
+					if ($df[$d][5] == ("/mnt/" . $vginfo[0] . "/" . $volumes_id[$j]))
+					{
+						$fs_size = $df[$d][1];
+						$fs_used = $df[$d][2];
+						$fs_free = $df[$d][3];
+					}
+				}
+
+				$snapshots_exist = false;
+
+				for ($d = 0; $d < count($snapshots_id); $d++)
+				{
+					if (($snapshots_lvname[$d] == $volumes_id[$j]) && ($snapshots_vgname[$d] == $volumes_vg[$j]))
+					{
+						$snapshots_exist = true;
+						break;
+					}
+				}
+
+				if (!$snapshots_exist)
+				{
+					for ($d = 0; $d < count($schedule_lvname); $d++)
+					{
+						if (($schedule_lvname[$d] == $volumes_id[$j]) && ($schedule_vgname[$d] == $volumes_vg[$j]))
+						{
+							$snapshots_exist = true;
+							break;
+						}
+					}
+				}
+
+				print("<tr>\n");
+				/*print("<td bgcolor=\"" . $piecolors[$j % 16] . "\" align=\"left\" valign=\"middle\"></td>\n"); */
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"left\" valign=\"middle\">" . htmlentities($volumes_id[$j]) . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"left\" valign=\"middle\">" . htmlentities($volumes_name[$j]) . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">" . $size . " MB</td>\n");
+
+				if ($volumes_fstype[$j] != "iscsi")
+				{
+					$fs_size = "Not available";
+					$fs_used = "Not available";
+					$fs_free = "Not available";
+
+					for ($d = 0; $d < count($df); $d++)
+					{
+						if ($df[$d][5] == ("/mnt/" . $vginfo[0] . "/" . $volumes_id[$j]))
+						{
+							$fs_size = $df[$d][1];
+							$fs_used = $df[$d][2];
+							$fs_free = $df[$d][3];
+						}
+					}
+
+					$fs = 0;
+					$fsfound = false;
+
+					for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+					{
+						if ($fs_info[$fsi]["type"] == $volumes_fstype[$j])
+						{
+							$fs = $fsi;
+							$fsfound = true;
+							break;
+						}
+					}
+
+					if ($fsfound == false)
+						$fs = 0;
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">" . $fs_info[$fs]["name"] . "</td>\n");
+				}
+				else
+				{
+					$fs_size = "Not applicable";
+					$fs_used = "Not applicable";
+					$fs_free = "Not applicable";
+
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">iSCSI</td>\n");
+
+					global $targetIqn;
+					$targetIqn = array();
+					if ($ietObj != NULL) {
+						$lunPath = "/dev/" . $volumes_vg[$j] . "/" . $volumes_id[$j];
+						$targetIqn = $ietObj->getLunUsage($lunPath);
+					}
+
+				}
+
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">" . $fs_size . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">" . $fs_used . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">" . $fs_free . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">");
+
+				if ($snapshots_exist || ($volumes_fstype[$j] == "iscsi" && count($targetIqn) > 0))
+				{
+					if ($snapshots_exist)
+						print("<em>Snapshots exist</em>\n");
+					else
+						print("<em>In use</em>\n");
+				}
+				else
+				{
+					print("<div id=\"popup-" . $rand_id . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"sharespopup\">\n");
+					print("<p align=\"center\"><strong>Are you sure you want to delete<br />volume slice \"" . htmlentities($volumes_id[$j]) . "\"?</strong></p>\n");
+					print("<p align=\"center\">[&nbsp;<a href=\"volumes.html?action=Delete&amp;volume=" . urlencode($volumes_id[$j]) . "&amp;volume_vg=" . urlencode($volumes_vg[$j]) . "\">Yes</a> / <a href=\"#\" onclick=\"hideCurrentPopup(); return false;\">NO DON'T DELETE</a>&nbsp;]</p>\n");
+					print("</div>\n");
+					print("<a href=\"#\" onclick=\"return !showPopup('popup-" . $rand_id . "', event);\">Delete</a>\n");
+				}
+
+				print("</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\"><a href=\"volumes_edit.html?volume=" . urlencode($volumes_id[$j]) . "&amp;volume_vg=" . urlencode($volumes_vg[$j]) . "\">Edit</a></td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\"><a href=\"volumes_snapshots.html?volume=" . urlencode($volumes_id[$j]) . "&amp;vgname=" . urlencode($volumes_vg[$j]) . "\">" . ($snapshots_exist ? "Manage" : "Create") . "</a></td>\n");
+				print("</tr>\n");
+
+				$colcount++;
+			}
+
+			print("<tr>\n");
+			/*print("<td bgcolor=\"" . $piecolors[count($volumes_id) % 16] . "\" align=\"left\" valign=\"middle\"></td>\n");*/
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\" valign=\"middle\" colspan=\"10\"><strong>" .
+                              intval(round(($snapshots_size / 1024.0))) . " MB allocated to snapshots</strong></td>\n");
+			print("</tr>\n");
+
+			print("<tr>\n");
+			/*print("<td bgcolor=\"" . $piecolors[(count($volumes_id) + 1) % 16] . "\" align=\"left\" valign=\"middle\"></td>\n");*/
+			print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\" valign=\"middle\" colspan=\"10\"><strong>" . (($vginfo[15] * ($vginfo[12])) / (1024.0)) .
+                              " MB of free space left</strong></td>\n");
+			print("</tr>\n");
+
+			print("</table>\n");
+			print("</div>\n");
+		}
+		else
+		{
+			print("<p align=\"center\"><img src=\"/images/volumes_none.png\" alt=\"Image of greyed out volume pie chart\" /></p>\n");
+			printMessageBlock("warning", "<p>No existing volumes were found in this volume group.</p>\n");
+		}
+	}
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

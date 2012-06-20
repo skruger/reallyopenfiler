@@ -1,0 +1,1100 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+
+
+
+
+    $pageTabs = array("targetset"=>"false", "lunmap"=>"false", "networkacl"=>"false", "chapauth"=>"false");
+
+    $defaultTab = "targetset";
+
+    if (!isset($_COOKIE["subNavIscsi-$defaultTab"]))
+        $pageTabs["targetset"] = "true";
+    else
+        foreach ($pageTabs as $key=>$value)
+            $pageTabs[$key] = $_COOKIE["subNavIscsi-$key"] ;
+
+
+
+    require("pre.inc");
+    include("authenticated.inc");
+    include("ietIscsi.inc");
+
+
+    $serviceRunning = "false";
+    $sm = new ServiceManager();
+    $service = $sm->getService("iscsi-target"); 
+    if ($service->getStatus() == 1)
+        $serviceRunning = "true";
+
+
+
+
+    /* BEGIN TARGET CODE */
+
+
+    //print_r($pageTabs);
+
+    $targetObjs = new IetIscsi();
+
+    $existingTargets = $targetObjs->getConfigTargets();
+
+    $targetCount = $existingTargets->length;
+
+
+    if ($targetName)
+        setcookie("target-name", $targetName);
+    else
+        $targetName = $_COOKIE['target-name'];
+
+
+    if (strlen($targetName) <= 0) {
+        if ($targetCount > 0)
+            $targetName = $existingTargets->item(0)->getAttribute("Name");
+    }
+
+    if ($targetCount > 0) {
+
+        $targetLuns = $targetObjs->getTargetConfigLuns($targetName);
+
+    }
+
+    $outgoingUsers = $targetObjs->getTargetConfigOutgoingUsers($targetName);
+
+    if ($outgoingUsers)
+        $outgoingUserCount = $outgoingUsers->length;
+
+    $targetIncomingUsers = $targetObjs->getTargetConfigIncomingUsers($targetName);
+    $targetOutgoingUsers = $targetObjs->getTargetConfigOutgoingUsers($targetName);
+
+    $incomingUsers = array();
+    $outgoingUsers = array();
+
+    $usersExist = FALSE;
+
+
+    if ($targetIncomingUsers->length > 0) {
+
+        $usersExist = TRUE;
+
+        foreach($targetIncomingUsers as $targetUser) {
+            $username = $targetUser->getAttribute("username");
+            $password = $targetUser->getAttribute("password");
+            $tmpUser = array($username => $password);
+            $incomingUsers = array_merge($incomingUsers, $tmpUser );
+
+        }
+
+    }
+
+
+    if ($targetOutgoingUsers->length > 0) {
+
+        $usersExist = TRUE;
+
+        foreach($targetOutgoingUsers as $targetUser) {
+            $username = $targetUser->getAttribute("username");
+            $password = $targetUser->getAttribute("password");
+            $tmpUser = array($username => $password);
+            $outgoingUsers = array_merge($outgoingUsers, $tmpUser );
+
+        }
+
+    }
+
+
+
+    $elementNames = array ("HeaderDigest", "DataDigest",
+                            "MaxConnections", "InitialR2T",
+                            "ImmediateData", "MaxRecvDataSegmentLength",
+                            "MaxXmitDataSegmentLength",
+                            "MaxBurstLength", "FirstBurstLength",
+                            "DefaultTime2Wait", "DefaultTime2Retain",
+                            "MaxOutstandingR2T", "DataPDUInOrder",
+                            "DataSequenceInOrder", "ErrorRecoveryLevel",
+                            "Wthreads", "QueuedCommands");
+
+
+
+    if ($_POST['addNewTgt']) {
+
+        $newTgtName = $_POST['newTgtName'];
+        $target = new IetTarget(array("Name" => $newTgtName));
+        $targetObjs->addTarget($target);
+        header("Location: ./volumes_iscsi_targets.html?targetName=$newTgtName");
+        exit;
+
+    }
+
+    if ($_POST['formTargetSettings']) {
+
+        /* Set new target attributes */
+
+        global $targetObjs;
+
+
+        $targetNameArray = array("Name" => $_POST['updateTargetName']);
+        $valueArray = array();
+        $attrArray;
+
+        foreach ($elementNames as $key => $value)
+            array_push($valueArray, $_POST[$value]);
+
+
+        $attrArray = array_combine($elementNames, $valueArray);
+
+        $targetObjArray = array_merge($targetNameArray, $attrArray);
+
+
+        $newTargetObj = new IetTarget($targetObjArray);
+
+        $targetObjs->updateTarget($newTargetObj);
+
+     }
+
+
+     /* networks.xml parser */
+
+
+    global $networks_name;
+
+
+	$networks_count = 0;
+	$networks_name = array();
+	$networks_network = array();
+	$networks_netmask = array();
+	$networks_type = array();
+
+	function network_startelement($parser, $name, $attrs)
+	{
+		global $networks_count, $networks_name, $networks_network, $networks_netmask, $networks_type;
+
+		if ($name == "NETWORK")
+		{
+            if ($attrs["TYPE"] != "ups") {
+                $networks_name[$networks_count] = $attrs["NAME"];
+                $networks_network[$networks_count] = $attrs["NETWORK"];
+                $networks_netmask[$networks_count] = $attrs["NETMASK"];
+                $networks_type[$networks_count] = $attrs["TYPE"];
+                $networks_count++;
+            }
+		}
+	}
+
+	function network_endelement($parser, $name)
+	{
+	}
+
+	if (is_file("/opt/openfiler/etc/networks.xml"))
+	{
+		$network_parser = xml_parser_create();
+		xml_set_element_handler($network_parser, "network_startelement", "network_endelement");
+		$network_fp = fopen("/opt/openfiler/etc/networks.xml", "r");
+
+		while ($network_data = fread($network_fp, 4096))
+			xml_parse($network_parser, $network_data, feof($network_fp));
+
+		fclose($network_fp);
+		xml_parser_free($network_parser);
+	}
+
+
+	$networks_access = array();
+
+	for ($i = 0; $i < count($networks_network); $i++)
+		$networks_access[$i] = FALSE;
+
+	function access_startelement($parser, $name, $attrs)
+	{
+		global $networks_name, $networks_access;
+
+		if ($name == "NETWORK")
+		{
+			for ($i = 0; $i < count($networks_name); $i++)
+				if (($networks_name[$i] == $attrs["NETWORK"]) && ($attrs["ACCESS"] == "yes"))
+					$networks_access[$i] = TRUE;
+		}
+	}
+
+	function access_endelement($parser, $name)
+	{
+	}
+
+	if (is_file("/opt/openfiler/etc/iscsi/" . $targetName . "/" . $targetName . ".xml"))
+	{
+		$access_parser = xml_parser_create();
+		xml_set_element_handler($access_parser, "access_startelement", "access_endelement");
+		$access_fp = fopen("/opt/openfiler/etc/iscsi/" . $targetName . "/" .  $targetName . ".xml", "r");
+
+		while ($access_data = fread($access_fp, 4096))
+			xml_parse($access_parser, $access_data, feof($access_fp));
+
+		fclose($access_fp);
+		xml_parser_free($access_parser);
+	}
+
+
+        /* end networks.xml parser */
+
+    /* Begin delete user */
+
+
+    if ($action == "updateChap") {
+
+        global $targetName, $targetObjs;
+
+        $usertype = $_POST['usertype'];
+        $username = $_POST['username'];
+        $oldPassword = $_POST['password'];
+        $newPassword = $_POST['newPassword'];
+        $optype = $_POST['optype'];
+
+        if (!empty($username)) {
+
+
+            if ($optype == "Delete") {
+
+                $targetObjs->delChapSetting($username, $usertype, $targetName);
+
+            }
+
+            else if ($optype == "Update") {
+
+                if (!empty($newPassword)) {
+
+                    if ($oldPassword != $newPassword) {
+
+                        $userObj;
+
+
+                        if ($usertype == "IncomingUser")
+                            $userObj = new IetIncomingUser($username, $newPassword);
+                        else
+                            $userObj = new IetOutgoingUser($username, $newPassword);
+
+
+
+                        $targetObjs->updateChapSetting($userObj, $targetName);
+                    }
+                }
+            }
+        }
+
+        header ("Location: ./volumes_iscsi_targets.html?targetName=" . htmlentities($targetName));
+        exit;
+
+    }
+
+    /* End delete user */
+
+
+    /* Begin add chap user */
+
+
+    if ($_POST['addChapUser']) {
+
+        $targetName = $_POST['target'];
+        $usertype = $_POST['usertype'];
+        $username = $_POST['username'];
+        $password = $_POST['password'];
+
+        if (!empty($username) && !empty($password)) {
+
+            $userObj;
+
+            if ($usertype == "IncomingUser")
+                $userObj = new IetIncomingUser($username, $password);
+            else
+                $userObj = new IetOutgoingUser($username, $password);
+
+            $targetObjs->updateChapSetting($userObj, $targetName);
+
+        }
+
+        header("Location: ./volumes_iscsi_targets.html");
+        exit;
+
+    }
+
+    /* End add chap user */
+
+
+    /* Begin delete target */
+
+    if ($_POST['deleteTarget']) {
+
+        $targetTarget = $_POST['delTargetName'];
+
+        $targetObjs->delTarget($targetTarget);
+
+        setcookie("target-name", "");
+
+        header ("Location: ./volumes_iscsi_targets.html");
+        exit;
+
+    }
+
+    /* End delete target */
+
+
+    /* Begin set target network ACL */
+
+
+    if ($action == "setnacl") {
+        exec("export LANG=C; export LANG=C; /usr/bin/sudo /bin/mkdir -p /opt/openfiler/etc/iscsi/" . escapeshellarg($targetnacl) . "/");
+
+        $fp = popen("export LANG=C; export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/iscsi/" . escapeshellarg($targetnacl) . "/" . escapeshellarg($targetnacl) . ".xml", "w");
+
+        fputs($fp, "<?xml version=\"1.0\" ?>\n");
+        fputs($fp, "<iscsi-acl>\n");
+        for ($i = 0; $i < count($networks_network); $i++)
+        {
+            $xstr = "\t<network network=\"" . htmlentities($networks_name[$i]) . "\"";
+
+            if (${(sha1($networks_name[$i] . $networks_network[$i]) . "access")} == "yes")
+                    $xstr .= " access=\"yes\"";
+            else
+                    $xstr .= " access=\"no\"";
+
+            $xstr .= " />\n";
+
+            fputs($fp, $xstr);
+        }
+
+        fputs($fp, "</iscsi-acl>\n");
+        fputs($fp, "\n");
+
+        pclose($fp);
+
+        apply_configuration(array("services" => "keep", "chmod" => "no", "chmod_path" => ""));
+
+        header("Location: ./volumes_iscsi_targets.html?targetName=" . htmlentities($targetnacl));
+        exit;
+    }
+
+
+    /* End set target network ACL */
+
+
+
+
+
+    /* END TARGET CODE */
+
+    /* Begin LVM Code */
+
+    $newLuns = array();
+
+    $lvmObj = new LVM;
+
+    $lvmList = $lvmObj->getiSCSILvs();
+    $iscsisnaps = $lvmObj->getiSCSISnapshots();
+
+    $lunPathArray = array();
+    $targetLunArray = array();
+
+    if ($lvmList) {
+
+        if ($targetLuns->length > 0) {
+
+            foreach ($targetLuns as $targetLun) {
+
+                $pathname = $targetLun->getAttribute("Path");
+                array_push($lunPathArray, $pathname);
+            }
+        }
+
+
+
+        foreach($lvmList as $lvmItem) {
+
+            $vg = $lvmItem->getAttribute("vg");
+            $lv = $lvmItem->getAttribute("id");
+            $path = "/dev/$vg/$lv";
+            $configname = $lvmItem->getAttribute("name");
+            $lvmetadata = $lvmObj->getLVMetadata($path);
+            $lvuuid = $lvmetadata['lv_uuid'];
+            $scsiIdSN = substr($lvuuid, 0, 16);
+
+            if (!in_array($path, $lunPathArray)) {
+                $newLun = array("Path"=>$path, "ScsiSN"=>$scsiIdSN, "ScsiId"=>$scsiIdSN, "configName"=>$configname);
+                array_push($newLuns, $newLun);
+            }
+        }
+    }
+
+
+    /* Begin add iscsi snapshot lun list */
+
+    if (count($iscsisnaps) > 0) {
+
+        if ($targetLuns->length > 0) {
+
+            foreach($targetLuns as $targetLun) {
+
+                array_push($targetLunArray,$targetLun->getAttribute("Path"));
+
+            }
+
+        }
+
+        foreach ($iscsisnaps as $key => $value) {
+
+            if (!in_array($value, $targetLunArray)) {
+
+                $lvmetadata = $lvmObj->getLVMetadata($value);
+                $lvuuid = $lvmetadata['lv_uuid'];
+                $scsiIdSN = substr($lvuuid, 0, 16);
+
+                $newLun = array("Path"=>$value, "ScsiSN"=>$scsiIdSN, "ScsiId"=>$scsiIdSN, "configName"=>"N/A");
+                array_push($newLuns, $newLun);
+
+            }
+
+        }
+    }
+
+    /* End add iscsi snapshot lun list */
+
+    /* End LVM code */
+
+    if ($_POST['mapNewLun']) {
+
+
+
+        $IOMode = $_POST['writemode'];
+        $Type = $_POST['transfermode'];
+        $Target = $_POST['targetMap'];
+        $Path = $_POST['lunPath'];
+        $ScsiId = $_POST['ScsiId'];
+        $ScsiSN = $_POST['ScsiSN'];
+        $lunId = $targetObjs->getNextLunId($Target);
+
+        $lunAttrs = array("Id"=>"$lunId","Path"=>$Path, "ScsiId"=>$ScsiId, "ScsiSN"=>$ScsiSN, "Type"=>$Type, "IOMode"=>$IOMode);
+        $lun = new IetLun($lunAttrs);
+        $targetObjs->addLunToTarget($lun, $Target);
+
+        header("Location: ./volumes_iscsi_targets.html");
+        exit;
+
+
+    }
+
+    if ($_POST['unmapLun']) {
+
+        $target = $_POST['targetName'];
+        $path = $_POST['lunpath'];
+
+        $targetObjs->delLunFromTarget($path, $target);
+
+        header("Location: ./volumes_iscsi_targets.html");
+        exit;
+
+    }
+
+
+    function tabActive($tab) {
+
+        $cookie = $_COOKIE["subNavIscsi-$tab"];
+        if ($cookie == "true")
+           return true;
+
+        return false;
+
+    }
+
+
+
+    generic_header(array("title" => _("Volumes : iSCSI Targets")));
+    single_begin(array());
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+
+function setActiveTabCookie(tabName) {
+
+    var pageTabs = ["targetset", "lunmap", "networkacl", "chapauth"];
+
+    for (i=0; i < pageTabs.length; i++)  {
+
+        if (tabName == pageTabs[i]) {
+
+            var cookieval = "subNavIscsi-" + pageTabs[i];
+            document.cookie = ''+cookieval+' = '+true +'; path=/admin';
+            document.getElementById(pageTabs[i]).style.background="<?php print($GLOBALS["color_page_tab1_highlighted_background"]); ?>";
+            changeObjectVisibility(tabName+"container", 'visible');
+
+        }
+
+        else {
+
+            var cookieval = "subNavIscsi-" + pageTabs[i];
+            document.cookie = ''+cookieval+' = '+ false +'; path=/admin';
+            document.getElementById(pageTabs[i]).style.background="<?php print($GLOBALS["color_page_tab1_regular_background"]); ?>";
+            changeObjectVisibility(pageTabs[i]+"container", 'hidden');
+        }
+    }
+}
+
+
+function showTab(tabName) {
+
+    setActiveTabCookie(tabName);
+    return false;
+}
+
+
+function readCookie(name) {
+
+    // courtesy of http://www.quirksmode.org/js/cookies.html
+    var nameEQ = name + "=";
+    var ca = document.cookie.split(';');
+    for(var i=0;i < ca.length;i++) {
+        var c = ca[i];
+        while (c.charAt(0)==' ') c = c.substring(1,c.length);
+        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+    }
+    return null;
+}
+
+function onloadVolumesIscsiTargets() {
+
+    /*
+     * check whether service is running.
+     * if service is not running, disable all
+     * form elements -- NOTE: once ietIscsi can
+     * run in offline mode, this will no longer be
+     * necessary.
+     *
+     * TODO: remove check for iscsi-target service running when
+     * ietIscsi can run in offline mode.
+     */
+
+    var serviceRunning = "<?php global $serviceRunning;  print($serviceRunning); ?>";
+
+    if (serviceRunning == "false")
+        for (i=0; i<document.forms.length; i++)
+            for (j=0; j<document.forms[i].elements.length; j++)
+                document.forms[i].elements[j].disabled = true;
+                
+                
+                
+    // Disable target delete button if luns are mapped
+    
+    var numMappedLuns = "<?php print($targetObjs->getTargetConfigLuns($targetName)->length);?>";
+    
+    if (numMappedLuns > 0)
+        document.getElementById("deleteTarget").disabled = true;
+
+    var pageTabs = ["targetset", "lunmap", "networkacl", "chapauth"];
+    var defaultTab = "targetset";
+
+
+    for (i=0; i < pageTabs.length; i++) {
+
+        var cookieString = "subNavIscsi-"+ pageTabs[i];
+        if (readCookie(cookieString) == "true")
+            defaultTab = pageTabs[i];
+    }
+
+    showTab(defaultTab);
+}
+
+
+
+// -->
+</script>
+
+
+<p>&nbsp;</p>
+
+<?php
+
+        nested_tab_begin("C_VOLUME_ISCSI_TARGETS");
+
+
+
+
+?><table cellpadding="0" cellspacing="0" border="0" style="width: 95%;"><tr>
+<td id="page_nav" style="margin-left: auto; margin-right: auto;"><ul>
+<li id="targetset" <?php if(tabActive("targetset")) print("class=\"active\""); ?>><a href="#"  onclick="return showTab('targetset');" >Target Configuration</a></li>
+<li id="lunmap" <?php if(tabActive("lunmap")) print("class=\"active\""); ?>><a href="#" onclick="return showTab('lunmap');" >LUN Mapping</a></li>
+<li id="networkacl" <?php if(tabActive("networkacl")) print("class=\"active\""); ?>><a href="#"  onclick="return showTab('networkacl');" >Network ACL</a></li>
+<li id="chapauth" <?php if(tabActive("chapauth")) print("class=\"active\""); ?>><a href="#"  onclick="return showTab('chapauth');" >CHAP Authentication</a></li>
+</ul>
+</td></tr>
+
+</table>
+<?php
+
+            print("<div id=\"targetsetcontainer\">\n");
+            $dvalue = $GLOBALS["color_table_row1"];
+            $newTgtName = "iqn.2006-01.com.openfiler:tsn." . trim($targetObjs->getTargetSN());
+            print("<h3>Add new iSCSI Target</h3>");
+            print("<form name=\"addNewTarget\" action=\"volumes_iscsi_targets.html\" method=\"post\">");
+            print("<table cellspacing=\"2\" cellpadding=\"8\"><tr class=\"color_table_heading\"><td><strong>Target IQN</strong></td><td><strong>Add</strong></td></tr>");
+
+
+            print("<tr bgcolor=\"$dvalue\"><td><input name=\"newTgtName\" type=\"text\" size=\"40\" value=\"$newTgtName\"/></td>");
+            print("<td><input type=\"submit\" name=\"addNewTgt\" value=\"Add\"/></td></tr>");
+          //  print("<input type=\"hidden\" name=\"newTgtName\" value=\"$newTgtName\"/>");
+
+            print("</table>");
+            print("</form>");
+
+        if ($targetCount > 0) {  // start of targetCount block
+?>
+            <hr/>
+            <h3 align="center">Select iSCSI Target</h3>
+
+            <?php printMessageBlock("info", "<p>Please select an iSCSI target to display and/or edit.</p>"); ?>
+
+            <form action="volumes_iscsi_targets.html" method="post">
+            <p align="center">
+            <select name="targetName">
+    <?php
+
+
+            foreach ($existingTargets as $existingTarget) {
+
+                $existingTargetName = $existingTarget->getAttribute("Name");
+
+                print("\t\t<option" . (($existingTargetName == $targetName) ? " selected=\"selected\"" : "") .
+                      " value=\"" . htmlentities($existingTargetName)  . "\">" .
+                      htmlentities($existingTargetName) . "&nbsp;</option>\n");
+
+            }
+    ?>
+            </select>&nbsp;<input type="submit" value="Change" />&nbsp;
+            </p>
+            </form>
+
+            <p>&nbsp;</p>
+            <hr/>
+            <h3> Settings for target: <?php print($targetName); ?> </h3>
+            <p>&nbsp;</p>
+            <form name="formTargetSettings" action="volumes_iscsi_targets.html" method="post">
+                <input type="hidden" name="delTargetName" value="<?php print($targetName); ?>"/>
+                <input type="hidden" name="updateTargetName" value="<?php print($targetName); ?>"/>
+            <table cellpadding="8" cellspacing="2" border="0">
+                <?php
+
+                    $target = $targetObjs->getConfigTarget($targetName);
+
+                    global $elementNames;
+                    $yesnoelements = array("InitialR2T", "ImmediateData", "DataPDUInOrder", "DataSequenceInOrder");
+                    $crc32celements = array("HeaderDigest", "DataDigest");
+                    $disabledelements = array("DefaultTime2Wait", "DefaultTime2Retain", "MaxConnections", "ErrorRecoveryLevel",
+                                              "DataPDUInOrder", "DataSequenceInOrder");
+
+                    $dcolor = 0;
+                    print("<tr><td class=\"color_table_heading\"><strong>Target Attribute</strong></td><td class=\"color_table_heading\"><strong>Attribute Value</strong></td></tr>");
+                    foreach ($elementNames as $elementName) {
+
+                        if ($dcolor == 0) {
+                            $dcolor = 1;
+                            $dvalue = $GLOBALS["color_table_row1"];
+                        }
+                        else {
+                            $dcolor = 0;
+                            $dvalue = $GLOBALS["color_table_row2"];
+                        }
+
+                        $node = $target->getElementsByTagName($elementName)->item(0);
+                        $nodevalue = $node->getAttribute("value");
+                        if (!in_array($elementName,$yesnoelements) && !in_array($elementName,$crc32celements)) {
+                            if (!in_array($elementName,$disabledelements))
+                                print("<tr bgcolor=\"$dvalue\"><td><strong>$elementName</strong>
+                                      </td><td><input type=\"text\" name=\"$elementName\" value=\"" . $nodevalue . "\"/></td></tr>");
+                            else
+                                print("<tr bgcolor=\"$dvalue\"><td><strong>$elementName</strong>
+                                      </td><td><input type=\"text\" readonly=\"readonly\" name=\"$elementName\" value=\"" . $nodevalue . "\"/></td></tr>");
+
+                        }
+                        else if (in_array($elementName, $yesnoelements))
+                            print("<tr bgcolor=\"$dvalue\"><td><strong>$elementName</strong></td>
+                                   <td><select name=\"$elementName\">
+                                       <option value=\"Yes\"" . (($nodevalue == "Yes") ? " selected=\"selected\"" : "" ) . ">Yes&nbsp;</option>
+                                       <option value=\"No\"" . (($nodevalue == "No") ? " selected=\"selected\"" : "" ) . ">No&nbsp;</option>
+                                       </select>
+                                    </td></tr>");
+                        else if (in_array($elementName,$crc32celements))
+                            print("<tr bgcolor=\"$dvalue\"><td><strong>$elementName</strong></td>
+                                   <td><select name=\"$elementName\">
+                                       <option value=\"CRC32C\"" . (($nodevalue == "CRC32C") ? " selected=\"selected\"" : "" ) . ">CRC32C</option>
+                                       <option value=\"None\"" . (($nodevalue == "None") ? " selected=\"selected\"" : "" ) . ">None</option>
+                                       </select>
+                                    </td></tr>");
+
+                    }
+
+                ?>
+            <tr><td><input type="submit" value="Delete" id="deleteTarget" name="deleteTarget"/>&nbsp; </td>
+                <td align="center"><input type="submit" name="formTargetSettings" value="Update"/></td>
+            </tr>
+            </table>
+            </form>
+            <hr />
+            </div>
+            <div id="lunmapcontainer">
+            <h3>LUNs mapped to target: <?php print($targetName) ?></h3>
+            <p>&nbsp;</p>
+            <?php
+
+                $lunElements = $targetObjs->getTargetConfigLuns($targetName);
+
+
+                if ($lunElements->length > 0) {
+
+                    print("<table cellspacing=\"2\" cellpadding=\"8\" border=\"0\">\n");
+                    print("<tr><td align=\"center\" class=\"color_table_heading\"><strong>LUN Id.</strong></td>\n");
+                    print("<td align=\"center\" class=\"color_table_heading\"><strong>LUN Path</strong></td>\n");
+                    print("<td align=\"center\" class=\"color_table_heading\"><strong>R/W Mode</strong></td>\n");
+                    print("<td align=\"center\" class=\"color_table_heading\"><strong>SCSI Serial No.</strong></td>\n");
+                    print("<td align=\"center\" class=\"color_table_heading\"><strong>SCSI Id.</strong></td>\n");
+                    print("<td align=\"center\" class=\"color_table_heading\"><strong>Transfer Mode</strong></td>\n");
+                    print("<td align=\"center\" class=\"color_table_heading\"><strong>Unmap LUN</strong></td></tr>");
+                    $dcolor = 0;
+
+                    foreach($lunElements as $lunElement) {
+
+
+                        if ($dcolor == 0) {
+                            $dcolor = 1;
+                            $dvalue = $GLOBALS["color_table_row1"];
+                        }
+                        else {
+                            $dcolor = 0;
+                            $dvalue = $GLOBALS["color_table_row2"];
+                        }
+
+                        $id = $lunElement->getAttribute("Id");
+                        $path = $lunElement->getAttribute("Path");
+                        $IOMode = $lunElement->getAttribute("IOMode");
+                        $ScsiSN = $lunElement->getAttribute("ScsiSN");
+                        $ScsiId = $lunElement->getAttribute("ScsiId");
+                        $Type = $lunElement->getAttribute("Type");
+
+
+                        switch ($IOMode) {
+
+                            case "wt":
+                                $textIOMode = "write-thru";
+                                break;
+                            case "wb":
+                                $textIOMode = "write-back";
+                                break;
+                            case "ro":
+                                $textIOMode = "read-only";
+                                break;
+                            default:
+                                break;
+
+                        }
+
+                        print("<form name=\"unmapLuns\" action=\"volumes_iscsi_targets.html\" method=\"post\">");
+                        print("<input type=\"hidden\" name=\"lunpath\" value=\"$path\"/>");
+                        print("<input type=\"hidden\" name=\"targetName\" value=\"$targetName\"/>");
+                        print("<tr><td align=\"center\" bgcolor=\"$dvalue\">$id</td>\n");
+                        print("<td align=\"center\" bgcolor=\"$dvalue\">$path</td>\n");
+                        print("<td align=\"center\" bgcolor=\"$dvalue\">$textIOMode</td>\n");
+                        print("<td align=\"center\" bgcolor=\"$dvalue\">$ScsiSN</td>\n");
+                        print("<td align=\"center\" bgcolor=\"$dvalue\">$ScsiId</td>\n");
+                        print("<td align=\"center\" bgcolor=\"$dvalue\">$Type</td>");
+                        print("<td align=\"center\" bgcolor=\"$dvalue\"><input type=\"submit\" name=\"unmapLun\" value=\"Unmap\"/></td></tr>");
+                        print("</form>");
+
+                    }
+
+                    print ("</table>\n");
+                }
+
+                else {
+
+                    printMessageBlock("warning", "<p><strong>No LUNs mapped to this target</strong></p>");
+
+                }
+
+                if (count($newLuns) > 0) {
+
+                    print("<p>&nbsp;</p>");
+                    print("<h3>Map New LUN to Target: \"$targetName\"</h3>");
+
+                    print("<table cellspacing=\"2\" cellpadding=\"8\">");
+                    print("<tr class=\"color_table_heading\"><td><strong>Name</strong></td><td><strong>LUN Path</strong></td>");
+                    print("<td><strong>R/W Mode</strong></td><td><strong>SCSI Serial No. </strong></td><td><strong>SCSI Id.</strong></td>");
+                    print("<td><strong>Transfer Mode</strong></td><td><strong>Map LUN</strong></td></tr>");
+
+                    $dcolor = 0;
+
+                    foreach($newLuns as $key => $value) {
+
+                            if ($dcolor == 0) {
+                                $dcolor = 1;
+                                $dvalue = $GLOBALS["color_table_row1"];
+                            }
+                            else {
+                                $dcolor = 0;
+                                $dvalue = $GLOBALS["color_table_row2"];
+                            }
+
+
+
+                            print("<form name=\"mapLun\" action=\"volumes_iscsi_targets.html\" method=\"post\">");
+                            print("<input type=\"hidden\" name=\"targetMap\" value=\"$targetName\"/>");
+                            print("<input type=\"hidden\" name=\"lunPath\" value=\"" . $value["Path"] . "\"/>");
+                            print("<input type=\"hidden\" name=\"ScsiId\" value=\"" . $value["ScsiId"] . "\"/>");
+                            print("<input type=\"hidden\" name=\"ScsiSN\" value=\"" . $value["ScsiSN"] . "\"/>");
+                            print("<tr bgcolor=\"$dvalue\"><td>" . $value["configName"] . "</td>");
+                            print("<td>" . $value["Path"] . "</td>");
+                            print("<td><select name=\"writemode\">");
+                            print("<option name=\"wt\" value=\"wt\">write-thru</option>");
+                            print("<option name=\"wb\" value=\"wb\">write-back</option>");
+                            print("<option name=\"ro\" value=\"ro\">read-only</option>");
+                            print("</select></td>");
+                            print("<td>" . $value["ScsiSN"] . "</td><td>" . $value["ScsiId"] . "</td>");
+                            print("<td><select name=\"transfermode\">");
+                            print("<option name=\"blockio\" value=\"blockio\">blockio</option>");
+                            print("<option name=\"fileio\" value=\"fileio\">fileio</option>");
+                            print("</select></td>");
+                            print("<td><input type=\"submit\" name=\"mapNewLun\" value=\"Map\"/></td></tr>");
+                            print("</form>");
+                    }
+
+                    print("</table>");
+
+                }
+
+                else {
+                    print("<p>&nbsp;</p>");
+                    printMessageBlock("warning", "<p>All mappable iSCSI LUNs for this target have been mapped.</p>");
+
+                }
+            ?>
+
+
+    <?php
+            print("<p align=\"center\">&nbsp;</p>\n");
+
+            print("<hr size=\"1\" />\n");
+            print("</div>"); // close lunmap container
+
+            print("<div id=\"networkaclcontainer\">"); // begin network acl container
+            print("<h3 align=\"center\">iSCSI host access configuration for target \"" . $targetName . "\"</h3>\n");
+
+            if (count($networks_network) > 0)
+            {
+                    print("<form name=\"naclform\" action=\"volumes_iscsi_targets.html\" method=\"post\">\n");
+                    print("<input type=\"hidden\" name=\"targetnacl\" value=\"" . htmlentities($targetName) . "\" />\n");
+                    print("<input type=\"hidden\" name=\"action\" value=\"setnacl\" />\n");
+
+                    print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+    ?>
+            <tr>
+                    <td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Name</strong></td>
+                    <td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Network/Host</strong></td>
+                    <td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Netmask</strong></td>
+                    <td align="center" bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Access</strong></td>
+            </tr>
+    <?php
+
+                    $dcolor = 0;
+
+                    for ($i = 0; $i < count($networks_network); $i++)
+                    {
+                            if ($networks_type[$i] != "share")
+                                    continue;
+
+                            if ($dcolor == 0)
+                            {
+                                    $dcolor = 1;
+                                    $dvalue = $GLOBALS["color_table_row1"];
+                            }
+                            else
+                            {
+                                    $dcolor = 0;
+                                    $dvalue = $GLOBALS["color_table_row2"];
+                            }
+
+                            print("<tr>\n");
+
+                            print("\t<td bgcolor=\"" . $dvalue . "\">" . htmlentities($networks_name[$i]) . "</td>\n");
+                            print("\t<td bgcolor=\"" . $dvalue . "\">" . htmlentities($networks_network[$i]) . "</td>\n");
+                            print("\t<td bgcolor=\"" . $dvalue . "\">" . htmlentities($networks_netmask[$i]) . "</td>\n");
+                            print("\t<td bgcolor=\"" . $dvalue . "\" align=\"center\">\n");
+                            print("\t<select name=\"" . sha1($networks_name[$i] . $networks_network[$i]) . "access\">\n");
+                            print("\t\t<option value=\"no\"" . ($networks_access[$i] ? "" : " selected=\"selected\"") . ">Deny</option>\n");
+                            print("\t\t<option value=\"yes\"" . ($networks_access[$i] ? " selected=\"selected\"" : "") . ">Allow</option>\n");
+                            print("\t</select>\n");
+                            print("</td>\n");
+
+                            print("</tr>\n");
+                    }
+
+                    print("</table>\n");
+
+                    print("<p align=\"center\"><input type=\"submit\" name=\"submit\" value=\"Update\" /></p>\n");
+                    print("</form>\n");
+            }
+            else
+                    print("<p>A list of networks have not been created yet.<br />You cannot configure network access control unless<br />you create a list of networks in the <a href=\"system.html\">Local Networks</a> section.<br />Until that time, this iSCSI target will be unavailable.</p>\n");
+
+            global $incomingUsers;
+            print("<hr size=\"1\"/>");
+            print("<p>&nbsp;</p>");
+            print("</div>"); // close network acl container
+            print("<div id=\"chapauthcontainer\">"); // begin chap auth container
+            print("<h3>CHAP Authentication Settings for target \"$targetName\"</h3>");
+
+            if ($usersExist) {
+                print("<table cellspacing=\"2\" cellpadding=\"8\">");
+    ?>
+                <tr><td class="color_table_heading"><strong>User Type</strong></td>
+                    <td class="color_table_heading"><strong>Username</strong></td>
+                    <td class="color_table_heading"><strong>Password</strong></td>
+                    <td class="color_table_heading"><strong>Update</strong></td>
+                    <td class="color_table_heading"><strong>Delete</strong></td>
+                </tr>
+    <?php
+
+
+
+                $dcolor = 0;
+                foreach ($incomingUsers as $username => $password) {
+
+                    if ($dcolor == 0) {
+                        $dcolor = 1;
+                        $dvalue = $GLOBALS["color_table_row1"];
+                    }
+                    else {
+                        $dcolor = 0;
+                        $dvalue = $GLOBALS["color_table_row2"];
+                    }
+
+                    print("<form name=\"updateChap\" action=\"volumes_iscsi_targets.html\" method=\"post\">");
+                    print("<input type=\"hidden\" name=\"username\" value=\"$username\"/>");
+                    print("<input type=\"hidden\" name=\"password\" value=\"$password\"/>");
+                    print("<input type=\"hidden\" name=\"action\" value=\"updateChap\"/>");
+                    print("<input type=\"hidden\" name=\"usertype\" value=\"IncomingUser\"/>");
+                    print("<tr bgcolor=\"$dvalue\"><td><strong>Incoming User</strong></td><td>$username</td><td><input type=\"text\"
+                            value=\"$password\" name=\"newPassword\"/></td><td><input type=\"submit\" name=\"optype\" value=\"Update\"/></td><td><input
+                            type=\"submit\" name=\"optype\" value=\"Delete\"/></td></tr>");
+                    print("</form>");
+
+
+                }
+
+                foreach ($outgoingUsers as $username => $password) {
+
+                    if ($dcolor == 0) {
+                        $dcolor = 1;
+                        $dvalue = $GLOBALS["color_table_row1"];
+                    }
+                    else {
+                        $dcolor = 0;
+                        $dvalue = $GLOBALS["color_table_row2"];
+                    }
+
+                    print("<form name=\"updateChap\" action=\"volumes_iscsi_targets.html\" method=\"post\">");
+                    print("<input type=\"hidden\" name=\"username\" value=\"$username\"/>");
+                    print("<input type=\"hidden\" name=\"password\" value=\"$password\"/>");
+                    print("<input type=\"hidden\" name=\"action\" value=\"updateChap\"/>");
+                    print("<input type=\"hidden\" name=\"usertype\" value=\"OutgoingUser\"/>");
+                    print("<tr bgcolor=\"$dvalue\"><td><strong>Outgoing User</strong></td><td>$username</td><td><input type=\"text\"
+                            value=\"$password\" name=\"newPassword\"/></td><td><input type=\"submit\" name=\"optype\" value=\"Update\"/></td><td><input
+                            type=\"submit\" name=\"optype\" value=\"Delete\"/></td></tr>");
+                    print("</form>");
+
+                }
+
+                print("</table>");
+
+            }
+
+            else {
+
+                printMessageBlock("warning", "<p>No users assigned to this target.</p>");
+
+            }
+
+                print("<p>&nbsp;</p>");
+                print("<h3>Add CHAP user to target \"$targetName\"</h3>");
+                print("<form name=\"addChap\" action=\"volumes_iscsi_targets.html\" method=\"post\">");
+            ?>
+                <table cellspacing="2" cellpadding="8" border="0">
+                    <tr class="color_table_heading">
+                        <td><strong>Username</strong></td>
+                        <td><strong>Password</strong></td>
+                        <td><strong>User Type</strong></td>
+                        <td><strong>Add</strong></td>
+                    </tr>
+
+    <?php
+
+
+                print("<input type=\"hidden\" name=\"target\" value=\"$targetName\"/>");
+                print("<tr bgcolor=\"$dvalue\"><td><input type=\"text\" name=\"username\"/></td>");
+                print("<td><input type=\"text\" name=\"password\"/></td>");
+                print("<td><select name=\"usertype\">");
+                print("<option value=\"IncomingUser\">Incoming User</option>");
+                if ($outgoingUserCount == 0)
+                    print("<option value=\"OutgoingUser\">Outgoing User</option>");
+                print("</select></td>");
+                print("<td><input type=\"submit\"  name=\"addChapUser\" value=\"Add\"/></td></tr>");
+
+
+
+    ?>
+
+
+                </table>
+                </form>
+                <hr/>
+                </div> <!-- end chap auth container -->
+
+<?php
+        } // end of targetCount block
+
+
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+?>

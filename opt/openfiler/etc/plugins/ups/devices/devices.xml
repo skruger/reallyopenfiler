@@ -1,0 +1,9 @@
+<upsdevices>
+	<device id="backupscs350" name="Back-UPS CS 350 USB/Serial" manufacturer="APC" driver="apcsmart"/>
+	<device id="backupscs500" name="Back-UPS CS 500 USB/Serial" manufacturer="APC" driver="apcsmart"/>
+        <device id="backupscs650" name="Back-UPS CS 650" manufacturer="APC" driver="apcsmart"/>
+        <device id="regpronetups1000VA" name="Regulator Pro Network UPS - 1000VA" manufacturer="Belkin" driver="belkin"/>
+        <device id="regpronetups1400VA" name="Regulator Pro Network UPS - 1400VA" manufacturer="Belkin" driver="belkin"/>
+        <device id="regpronetups700VA" name="Regulator Pro Network UPS - 700VA" manufacturer="Belkin" driver="belkin"/>
+</upsdevices>
+

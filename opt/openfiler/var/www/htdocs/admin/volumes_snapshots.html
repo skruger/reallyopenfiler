@@ -1,0 +1,1394 @@
+<?php
+
+/*
+ *
+ *
+ * --------------------------------------------------------------------
+ * Copyright (c) 2001 - 2011 Openfiler Project.
+ * --------------------------------------------------------------------
+ *
+ * Openfiler is an Open Source SAN/NAS Appliance Software Distribution
+ *
+ * This file is part of Openfiler.
+ *
+ * Openfiler is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Openfiler is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Openfiler.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --------------------------------------------------------------------
+ *
+ *
+ */
+
+
+
+
+	$flockp = fopen("/opt/openfiler/var/oflocks/snap.lock", "w+");
+
+	if (!$flockp)
+	{
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+	if (!flock($flockp, LOCK_EX | LOCK_NB))
+	{
+		fclose($flockp);
+
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+	require("pre.inc");
+	include("authenticated.inc");
+	include("ietIscsi.inc");
+
+
+	/* create IetIscsi object */
+	$ietObj = NULL;
+	$service_iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+	if ($service_iscsi)
+		$ietObj = new IetIscsi();
+
+
+
+	$volumes_id = array();
+	$volumes_name = array();
+	$volumes_mountpoint = array();
+	$volumes_vg = array();
+	$volumes_fstype = array();
+
+	function volumes_startelement($parser, $name, $attrs)
+	{
+		global $volumes_id, $volumes_name, $volumes_mountpoint, $volumes_vg, $volumes_fstype;
+
+		if ($name == "VOLUME")
+		{
+			array_push($volumes_id, $attrs["ID"]);
+			array_push($volumes_name, $attrs["NAME"]);
+			array_push($volumes_mountpoint, $attrs["MOUNTPOINT"]);
+			array_push($volumes_vg, $attrs["VG"]);
+			array_push($volumes_fstype, $attrs["FSTYPE"]);
+		}
+	}
+
+	function volumes_endelement($parser, $name)
+	{
+	}
+
+	$volumes_parser = xml_parser_create();
+	xml_set_element_handler($volumes_parser, "volumes_startelement", "volumes_endelement");
+	$volumes_fp = fopen("/opt/openfiler/etc/volumes.xml", "r");
+
+	while ($volumes_data = fread($volumes_fp, 4096))
+		xml_parse($volumes_parser, $volumes_data, feof($volumes_fp));
+
+	fclose($volumes_fp);
+	xml_parser_free($volumes_parser);
+
+	$snapshots_id = array();
+	$snapshots_lvname = array();
+	$snapshots_vgname = array();
+	$snapshots_shared = array();
+	$snapshots_rotateid = array();
+	$snapshots_timestamp = array();
+
+	$schedule_size = array();
+	$schedule_share = array();
+	$schedule_timecounter = array();
+	$schedule_timemax = array();
+	$schedule_rotatecounter = array();
+	$schedule_rotatemax = array();
+	$schedule_lvname = array();
+	$schedule_vgname = array();
+
+	function snapshots_startelement($parser, $name, $attrs)
+	{
+		global $snapshots_id, $snapshots_lvname, $snapshots_vgname, $snapshots_shared, $snapshots_rotateid, $snapshots_timestamp;
+		global $schedule_size, $schedule_share;
+		global $schedule_timecounter, $schedule_timemax;
+		global $schedule_rotatecounter, $schedule_rotatemax;
+		global $schedule_lvname, $schedule_vgname;
+
+		if ($name == "SNAPSHOT")
+		{
+			array_push($snapshots_id, $attrs["ID"]);
+			array_push($snapshots_lvname, $attrs["LVNAME"]);
+			array_push($snapshots_vgname, $attrs["VGNAME"]);
+			array_push($snapshots_shared, $attrs["SHARED"]);
+			array_push($snapshots_rotateid, $attrs["ROTATEID"]);
+			array_push($snapshots_timestamp, $attrs["TIMESTAMP"]);
+		}
+		else if ($name == "SCHEDULE")
+		{
+			array_push($schedule_size, $attrs["SIZE"]);
+			array_push($schedule_share, $attrs["SHARE"]);
+			array_push($schedule_timecounter, $attrs["TIMECOUNTER"]);
+			array_push($schedule_timemax, $attrs["TIMEMAX"]);
+			array_push($schedule_rotatecounter, $attrs["ROTATECOUNTER"]);
+			array_push($schedule_rotatemax, $attrs["ROTATEMAX"]);
+			array_push($schedule_lvname, $attrs["LVNAME"]);
+			array_push($schedule_vgname, $attrs["VGNAME"]);
+		}
+	}
+
+	function snapshots_endelement($parser, $name)
+	{
+	}
+
+	$snapshots_parser = xml_parser_create();
+	xml_set_element_handler($snapshots_parser, "snapshots_startelement", "snapshots_endelement");
+	$snapshots_fp = fopen("/opt/openfiler/etc/snapshots.xml", "r");
+
+	while ($snapshots_data = fread($snapshots_fp, 4096))
+		xml_parse($snapshots_parser, $snapshots_data, feof($snapshots_fp));
+
+	fclose($snapshots_fp);
+	xml_parser_free($snapshots_parser);
+
+	global $cluster_enabled, $cluster_nodename, $cluster_resource;
+
+	$cluster_enabled = false;
+	$cluster_nodename = "";
+	$cluster_resource = array();
+
+	function cluster_startelement($parser, $name, $attrs)
+	{
+		global $cluster_enabled, $cluster_nodename, $cluster_resource;
+
+		if ($name == "CLUSTERING")
+		{
+			if ($attrs["STATE"] == "on")
+				$cluster_enabled = true;
+			else
+				$cluster_enabled = false;
+		}
+		else if ($name == "NODENAME")
+			$cluster_nodename = $attrs["VALUE"];
+		else if ($name == "RESOURCE")
+			array_push($cluster_resource, $attrs["VALUE"]);
+	}
+
+	function cluster_endelement($parser, $name)
+	{
+	}
+
+	$cluster_parser = xml_parser_create();
+	xml_set_element_handler($cluster_parser, "cluster_startelement", "cluster_endelement");
+	$cluster_fp = fopen("/opt/openfiler/etc/cluster.xml", "r");
+
+	while ($cluster_data = fread($cluster_fp, 4096))
+		xml_parse($cluster_parser, $cluster_data, feof($cluster_fp));
+
+	fclose($cluster_fp);
+	xml_parser_free($cluster_parser);
+
+
+	$fstype = "";
+
+	for ($fsj = 0; $fsj < count($volumes_id); $fsj++)
+	{
+		if (($vgname == $volumes_vg[$fsj]) && ($volume == $volumes_id[$fsj]))
+		{
+			$fstype = $volumes_fstype[$fsj];
+			break;
+		}
+	}
+
+	if (!$cluster_enabled)
+	{
+		$fstabp = popen("export LANG=C; /usr/bin/sudo /bin/cat /etc/fstab", "r");
+		$i = 0;
+		while (!feof($fstabp))
+		{
+			$j = 0;
+			$fstabstr = trim(fgets($fstabp, 4096));
+
+			if (strlen($fstabstr) <= 0)
+				continue;
+
+			if (substr($fstabstr, 0, 1) == "#")
+				continue;
+
+			$foo = explode(" ", $fstabstr);
+
+			foreach ($foo as $fresultitem)
+			{
+				$fresultitem = trim($fresultitem);
+				if (strlen($fresultitem) > 0)
+				{
+					$fstab[$i][$j] = $fresultitem;
+					$j++;
+				}
+			}
+
+			$i++;
+		}
+
+		$fstabcount = $i;
+
+		pclose($fstabp);
+	}
+
+	if ($_POST["snapaction"] == "takesnapshot")
+	{
+		if ((!is_valid_foldername($snapname)) || (substr(strtolower($snapname), 0, 5) == "sched") || (!is_numeric($snapsize)))
+		{
+			flock($flockp, LOCK_UN | LOCK_NB);
+			fclose($flockp);
+			header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+			exit;
+		}
+        
+        
+        // check for hyphen and replace with underscore
+        
+    
+		$snapname = preg_replace('/-/', '_', strtolower(trim($snapname)));
+		$mountpath = "/mnt/snapshots/" . $vgname . "/" . $volume . "/" . $snapname;
+
+
+		if ((!is_dir($mountpath)) && (!is_file($mountpath)))
+		{
+			$fs = 0;
+			$fsfound = false;
+
+			for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+			{
+				if ($fs_info[$fsi]["type"] == $fstype)
+				{
+					$fs = $fsi;
+					$fsfound = true;
+					break;
+				}
+			}
+
+			if ($fsfound == false)
+				$fs = 0;
+
+			
+			exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvcreate -s -L " . escapeshellarg($snapsize) . " -n of.snapshot." . escapeshellarg($volume) . "." . escapeshellarg($snapname) . " /dev/" . escapeshellarg($vgname) . "/" . escapeshellarg($volume));
+
+
+			$lvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvdisplay -c /dev/" . escapeshellarg($vgname) . "/of.snapshot." . escapeshellarg($volume) . "." . escapeshellarg($snapname), "r");
+			$i = 0;
+			while (!feof($lvp))
+				$lvds[$i++] = fgets($lvp, 4096);
+			pclose($lvp);
+
+			$lvinfo = explode(":", trim($lvds[0], " "));
+
+			if ($lvinfo[0] == ("/dev/" . $vgname . "/of.snapshot." . $volume . "." . $snapname))
+			{
+				array_push($snapshots_id, $snapname);
+				array_push($snapshots_lvname, $volume);
+				array_push($snapshots_vgname, $vgname);
+				array_push($snapshots_shared, $snapshare);
+				array_push($snapshots_rotateid, 0);
+				array_push($snapshots_timestamp, gmdate("Y-m-d H:i:s") . " GMT");
+
+				$snapshotsp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/snapshots.xml", "w");
+				fputs($snapshotsp, "<?xml version=\"1.0\" ?>\n");
+				fputs($snapshotsp, "<snapshots>\n");
+
+				for ($i = 0; $i < count($snapshots_id); $i++)
+					fputs($snapshotsp, "\t<snapshot"
+						. " id=\"". htmlentities($snapshots_id[$i])
+						. "\" lvname=\"" . htmlentities($snapshots_lvname[$i])
+						. "\" vgname=\"" . htmlentities($snapshots_vgname[$i])
+						. "\" shared=\"" . htmlentities($snapshots_shared[$i])
+						. "\" rotateid=\"" . htmlentities($snapshots_rotateid[$i])
+						. "\" timestamp=\"" . htmlentities($snapshots_timestamp[$i])
+						. "\" />\n");
+
+				for ($i = 0; $i < count($schedule_vgname); $i++)
+					fputs($snapshotsp, "\t<schedule"
+						. " size=\"" . htmlentities($schedule_size[$i])
+						. "\" share=\"" . htmlentities($schedule_share[$i])
+						. "\" timecounter=\"" . htmlentities($schedule_timecounter[$i])
+						. "\" timemax=\"" . htmlentities($schedule_timemax[$i])
+						. "\" rotatecounter=\"" . htmlentities($schedule_rotatecounter[$i])
+						. "\" rotatemax=\"" . htmlentities($schedule_rotatemax[$i])
+						. "\" lvname=\"" . htmlentities($schedule_lvname[$i])
+						. "\" vgname=\"" . htmlentities($schedule_vgname[$i])
+						. "\" />\n");
+
+				fputs($snapshotsp, "</snapshots>\n\n");
+				pclose($snapshotsp);
+
+				if ($fstype != "iscsi")
+					exec("export LANG=C; /usr/bin/sudo /bin/mkdir -p " . escapeshellarg($mountpath));
+
+				if (!$cluster_enabled)
+				{
+					if ($fstype != "iscsi")
+					{
+						$fstabp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee -a /etc/fstab", "w");
+						fputs($fstabp, "/dev/" . $vgname . "/of.snapshot." . $volume . "." . $snapname . " " . $mountpath . " " . $fs_info[$fs]["type"] . " " . $fs_info[$fs]["snapshot_mount_options"] . " 0 0\n");
+						pclose($fstabp);
+					}
+				}
+				else
+				{
+					$service_winbind = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service winbind status"), "running") ? 1 : 0);
+					$service_smb = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service smb status"), "running") ? 1 : 0);
+					$service_nfsv3 = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service nfs status"), "running") ? 1 : 0);
+					$service_http = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service httpd status"), "running") ? 1 : 0);
+					$service_ftp = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd status"), "running") ? 1 : 0);
+                                        $service_rsync = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service rsync status"), "running") ? 1 : 0);
+					$service_iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+
+
+					$clusterp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/ha.d/haresources", "w");
+
+					$cluster_resource_str = "";
+
+					for ($i = 0; $i < count($cluster_resource); $i++)
+						$cluster_resource_str .= " " . $cluster_resource[$i];
+
+					for ($i = 0; $i < count($volumes_id); $i++)
+					{
+						$fstype = $volumes_fstype[$i];
+
+						if ($fstype != "iscsi")
+						{
+							$fs = 0;
+							$fsfound = false;
+
+							for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+							{
+								if ($fs_info[$fsi]["type"] == $fstype)
+								{
+									$fs = $fsi;
+									$fsfound = true;
+									break;
+								}
+							}
+
+							if ($fsfound == false)
+								$fs = 0;
+
+							$cluster_resource_str .= " Filesystem::/dev/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . "/mnt/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["mount_options"];
+						}
+					}
+
+					for ($i = 0; $i < count($snapshots_id); $i++)
+					{
+						$fstype = "";
+
+						for ($fsj = 0; $fsj < count($volumes_id); $fsj++)
+						{
+							if (($snapshots_vgname[$i] == $volumes_vg[$fsj]) && ($snapshots_lvname[$i] == $volumes_id[$fsj]))
+							{
+								$fstype = $volumes_fstype[$fsj];
+								break;
+							}
+						}
+
+						if ($fstype != "iscsi")
+						{
+							$fs = 0;
+							$fsfound = false;
+
+							for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+							{
+								if ($fs_info[$fsi]["type"] == $fstype)
+								{
+									$fs = $fsi;
+									$fsfound = true;
+									break;
+								}
+							}
+
+							if ($fsfound == false)
+								$fs = 0;
+
+							$cluster_resource_str .= " Filesystem::/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i] . "::" . "/mnt/snapshots/" . $snapshots_vgname[$i] . "/" . $snapshots_lvname[$i] . "/" . $snapshots_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["snapshot_mount_options"];
+						}
+					}
+
+					if ($service_winbind > 0)
+						$cluster_resource_str .= " winbind";
+					if ($service_http > 0)
+						$cluster_resource_str .= " httpd";
+					if ($service_nfsv3 > 0)
+						$cluster_resource_str .= " nfs";
+					if ($service_smb > 0)
+						$cluster_resource_str .= " smb";
+					if ($service_ftp > 0)
+						$cluster_resource_str .= " proftpd";
+                                        if ($service_rsync > 0)
+                                                $cluster_resource_str .= " rsync";
+					if ($service_iscsi > 0)
+						$cluster_resource_str .= " iscsi-target";
+
+					$cluster_resource_str .= " openfiler";
+
+					fputs($clusterp, $cluster_nodename . $cluster_resource_str . "\n");
+					pclose($clusterp);
+				}
+
+				if ($fstype != "iscsi")
+					exec("export LANG=C; /usr/bin/sudo /bin/mount -t " . $fs_info[$fs]["type"] . " -o " . $fs_info[$fs]["snapshot_mount_options"] . " /dev/" . $vgname . "/of.snapshot." . $volume . "." . $snapname  . " " . escapeshellarg($mountpath));
+
+				apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+			}
+		}
+
+		flock($flockp, LOCK_UN | LOCK_NB);
+		fclose($flockp);
+		header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+		exit;
+	}
+	else if ($_POST["snapaction"] == "changesize")
+	{
+		for ($i = 0; $i < count($snapshots_lvname); $i++)
+			if ((${"changesize-" . $snapshots_vgname[$i] . "-" . $snapshots_lvname[$i] . "-" . $snapshots_id[$i]} == "Save") && (substr(strtolower($snapshots_lvname[$i]), 0, 5) != "sched"))
+			{
+				if ($GLOBALS["lvm_version"] == 1)
+					$snapshot_dev = "/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i];
+				else
+					$snapshot_dev = "/dev/mapper/" . $snapshots_vgname[$i] . "-of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i];
+
+				$snapshot_symlink_dev = "/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i];
+
+				if (file_exists($snapshot_dev))
+				{
+					$lvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvdisplay -c " . $snapshot_symlink_dev, "r");
+					$j = 0;
+					while (!feof($lvp))
+						$lvs[$j++] = fgets($lvp, 4096);
+					pclose($lvp);
+
+					$snapshot_info = explode(":", trim($lvs[0], " "));
+
+					$existing_snapshot_size = intval(round($snapshot_info[6] / 2048.0));
+					$new_snapshot_size = ${"newsize-" . $snapshots_vgname[$i] . "-" . $snapshots_lvname[$i] . "-" . $snapshots_id[$i]};
+
+					if ($new_snapshot_size > $existing_snapshot_size)
+						exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvextend -L " . escapeshellarg($new_snapshot_size) . " /dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i]);
+				}
+
+				$snapshotsp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/snapshots.xml", "w");
+				fputs($snapshotsp, "<?xml version=\"1.0\" ?>\n");
+				fputs($snapshotsp, "<snapshots>\n");
+
+				for ($j = 0; $j < count($snapshots_id); $j++)
+					if ($j != $i)
+						fputs($snapshotsp, "\t<snapshot"
+							. " id=\"" . htmlentities($snapshots_id[$j])
+							. "\" lvname=\"" . htmlentities($snapshots_lvname[$j])
+							. "\" vgname=\"" . htmlentities($snapshots_vgname[$j])
+							. "\" shared=\"" . htmlentities($snapshots_shared[$j])
+							. "\" rotateid=\"" . htmlentities($snapshots_rotateid[$j])
+							. "\" timestamp=\"" . htmlentities($snapshots_timestamp[$j])
+							. "\" />\n");
+					else
+						fputs($snapshotsp, "\t<snapshot"
+							. " id=\"" . htmlentities($snapshots_id[$j])
+							. "\" lvname=\"" . htmlentities($snapshots_lvname[$j])
+							. "\" vgname=\"" . htmlentities($snapshots_vgname[$j])
+							. "\" shared=\"" . htmlentities(${"snapshare-" . $snapshots_vgname[$i] . "-" . $snapshots_lvname[$i] . "-" . $snapshots_id[$i]})
+							. "\" rotateid=\"" . htmlentities($snapshots_rotateid[$j])
+							. "\" timestamp=\"" . htmlentities($snapshots_timestamp[$j])
+							. "\" />\n");
+
+				for ($j = 0; $j < count($schedule_vgname); $j++)
+					fputs($snapshotsp, "\t<schedule"
+						. " size=\"" . htmlentities($schedule_size[$j])
+						. "\" share=\"" . htmlentities($schedule_share[$j])
+						. "\" timecounter=\"" . htmlentities($schedule_timecounter[$j])
+						. "\" timemax=\"" . htmlentities($schedule_timemax[$j])
+						. "\" rotatecounter=\"" . htmlentities($schedule_rotatecounter[$j])
+						. "\" rotatemax=\"" . htmlentities($schedule_rotatemax[$j])
+						. "\" lvname=\"" . htmlentities($schedule_lvname[$j])
+						. "\" vgname=\"" . htmlentities($schedule_vgname[$j])
+						. "\" />\n");
+
+				fputs($snapshotsp, "</snapshots>\n");
+				pclose($snapshotsp);
+
+				break;
+			}
+
+		flock($flockp, LOCK_UN | LOCK_NB);
+		fclose($flockp);
+
+		apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+
+		header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+		exit;
+	}
+	else if ($_POST["snapaction"] == "schedulesnapshot")
+	{
+		if ((!is_numeric($snapsize)) || (!is_numeric($snapinterval)) || (!is_numeric($snaprotatecount)) || ($snaprotatecount < 1) || ($snapinterval < 1))
+		{
+			flock($flockp, LOCK_UN | LOCK_NB);
+			fclose($flockp);
+			header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+			exit;
+		}
+
+		array_push($schedule_size, $snapsize);
+		array_push($schedule_share, $snapshare);
+		array_push($schedule_timemax, $snapinterval);
+		array_push($schedule_timecounter, 23 - intval(date("H")));
+		array_push($schedule_rotatemax, $snaprotatecount);
+		array_push($schedule_rotatecounter, 0);
+		array_push($schedule_lvname, $volume);
+		array_push($schedule_vgname, $vgname);
+
+		$snapshotsp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/snapshots.xml", "w");
+		fputs($snapshotsp, "<?xml version=\"1.0\" ?>\n");
+		fputs($snapshotsp, "<snapshots>\n");
+
+		for ($i = 0; $i < count($snapshots_id); $i++)
+			fputs($snapshotsp, "\t<snapshot"
+				. " id=\"" . htmlentities($snapshots_id[$i])
+				. "\" lvname=\"" . htmlentities($snapshots_lvname[$i])
+				. "\" vgname=\"" . htmlentities($snapshots_vgname[$i])
+				. "\" shared=\"" . htmlentities($snapshots_shared[$i])
+				. "\" rotateid=\"" . htmlentities($snapshots_rotateid[$i])
+				. "\" timestamp=\"" . htmlentities($snapshots_timestamp[$i])
+				. "\" />\n");
+
+		for ($i = 0; $i < count($schedule_vgname); $i++)
+			fputs($snapshotsp, "\t<schedule"
+				. " size=\"" . htmlentities($schedule_size[$i])
+				. "\" share=\"" . htmlentities($schedule_share[$i])
+				. "\" timecounter=\"" . htmlentities($schedule_timecounter[$i])
+				. "\" timemax=\"" . htmlentities($schedule_timemax[$i])
+				. "\" rotatecounter=\"" . htmlentities($schedule_rotatecounter[$i])
+				. "\" rotatemax=\"" . htmlentities($schedule_rotatemax[$i])
+				. "\" lvname=\"" . htmlentities($schedule_lvname[$i])
+				. "\" vgname=\"" . htmlentities($schedule_vgname[$i])
+				. "\" />\n");
+
+		fputs($snapshotsp, "</snapshots>\n\n");
+		pclose($snapshotsp);
+
+		flock($flockp, LOCK_UN | LOCK_NB);
+		fclose($flockp);
+		header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+		exit;
+	}
+	else if ($_GET["snapaction"] == "deletesnapshot")
+	{
+		if (substr(strtolower($snapshot), 0, 5) == "sched")
+		{
+			flock($flockp, LOCK_UN | LOCK_NB);
+			fclose($flockp);
+			header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+			exit;
+		}
+
+		$snapshotsp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/snapshots.xml", "w");
+		fputs($snapshotsp, "<?xml version=\"1.0\" ?>\n");
+		fputs($snapshotsp, "<snapshots>\n");
+
+		for ($i = 0; $i < count($snapshots_id); $i++)
+			if (($snapshots_id[$i] != $snapshot) || ($snapshots_lvname[$i] != $volume) || ($snapshots_vgname[$i] != $vgname))
+				fputs($snapshotsp, "\t<snapshot"
+					. " id=\"" . htmlentities($snapshots_id[$i])
+					. "\" lvname=\"" . htmlentities($snapshots_lvname[$i])
+					. "\" vgname=\"" . htmlentities($snapshots_vgname[$i])
+					. "\" shared=\"" . htmlentities($snapshots_shared[$i])
+					. "\" rotateid=\"" . htmlentities($snapshots_rotateid[$i])
+					. "\" timestamp=\"" . htmlentities($snapshots_timestamp[$i])
+					. "\" />\n");
+
+		for ($i = 0; $i < count($schedule_vgname); $i++)
+			fputs($snapshotsp, "\t<schedule"
+					. " size=\"" . htmlentities($schedule_size[$i])
+					. "\" share=\"" . htmlentities($schedule_share[$i])
+					. "\" timecounter=\"" . htmlentities($schedule_timecounter[$i])
+					. "\" timemax=\"" . htmlentities($schedule_timemax[$i])
+					. "\" rotatecounter=\"" . htmlentities($schedule_rotatecounter[$i])
+					. "\" rotatemax=\"" . htmlentities($schedule_rotatemax[$i])
+					. "\" lvname=\"" . htmlentities($schedule_lvname[$i])
+					. "\" vgname=\"" . htmlentities($schedule_vgname[$i])
+					. "\" />\n");
+
+		fputs($snapshotsp, "</snapshots>\n");
+		pclose($snapshotsp);
+
+		if (!$cluster_enabled)
+		{
+			if ($fstype != "iscsi")
+			{
+				$fstabp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/fstab", "w");
+
+				for ($i = 0; $i < $fstabcount; $i++)
+				{
+					$str = "";
+
+					if ($fstab[$i][0] == "/dev/" . $vgname . "/of.snapshot." . $volume . "." . $snapshot)
+						continue;
+
+					for ($j = 0; $j < count($fstab[$i]); $j++)
+					{
+						if ($j > 0)
+							$str .= " ";
+						$str .= $fstab[$i][$j];
+					}
+
+					fputs($fstabp, ($str . "\n"));
+				}
+
+				pclose($fstabp);
+			}
+		}
+		else
+		{
+			$service_winbind = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service winbind status"), "running") ? 1 : 0);
+			$service_smb = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service smb status"), "running") ? 1 : 0);
+			$service_nfsv3 = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service nfs status"), "running") ? 1 : 0);
+			$service_http = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service httpd status"), "running") ? 1 : 0);
+			$service_ftp = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd status"), "running") ? 1 : 0);
+                        $service_rsync = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service rsync status"), "running") ? 1 : 0);
+			$service_iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+
+			$clusterp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/ha.d/haresources", "w");
+
+			$cluster_resource_str = "";
+
+			for ($i = 0; $i < count($cluster_resource); $i++)
+				$cluster_resource_str .= " " . $cluster_resource[$i];
+
+			for ($i = 0; $i < count($volumes_id); $i++)
+			{
+				$fstype = $volumes_fstype[$i];
+
+				if ($fstype != "iscsi")
+				{
+					$fs = 0;
+					$fsfound = false;
+
+					for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+					{
+						if ($fs_info[$fsi]["type"] == $fstype)
+						{
+							$fs = $fsi;
+							$fsfound = true;
+							break;
+						}
+					}
+
+					if ($fsfound == false)
+						$fs = 0;
+
+					$cluster_resource_str .= " Filesystem::/dev/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . "/mnt/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["mount_options"];
+				}
+			}
+
+			for ($i = 0; $i < count($snapshots_id) - 1; $i++)
+			{
+				$fstype = "";
+
+
+				for ($fsj = 0; $fsj < count($volumes_id); $fsj++)
+				{
+					if (($snapshots_vgname[$i] == $volumes_vg[$fsj]) && ($snapshots_lvname[$i] == $volumes_id[$fsj]))
+					{
+						$fstype = $volumes_fstype[$fsj];
+						break;
+					}
+				}
+
+					$fs = 0;
+					$fsfound = false;
+
+					for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+					{
+						if ($fs_info[$fsi]["type"] == $fstype)
+						{
+							$fs = $fsi;
+							$fsfound = true;
+							break;
+						}
+					}
+
+					if ($fsfound == false)
+						$fs = 0;
+
+				if ($fstype != "iscsi")
+				{
+					$cluster_resource_str .= " Filesystem::/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i] . "::" . "/mnt/snapshots/" . $snapshots_vgname[$i] . "/" . $snapshots_lvname[$i] . "/" . $snapshots_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["snapshot_mount_options"];
+				}
+			}
+
+			if ($service_winbind > 0)
+				$cluster_resource_str .= " winbind";
+			if ($service_http > 0)
+				$cluster_resource_str .= " httpd";
+			if ($service_nfsv3 > 0)
+				$cluster_resource_str .= " nfs";
+			if ($service_smb > 0)
+				$cluster_resource_str .= " smb";
+			if ($service_ftp > 0)
+				$cluster_resource_str .= " proftpd";
+                        if ($service_rsync > 0)
+                                $cluster_resource_str .= " rsync";
+			if ($service_iscsi > 0)
+				$cluster_resource_str .= " iscsi-target";
+
+			$cluster_resource_str .= " openfiler";
+
+			fputs($clusterp, $cluster_nodename . $cluster_resource_str . "\n");
+			pclose($clusterp);
+		}
+
+		apply_configuration(array("services" => "reload", "chmod" => "no", "chmod_path" => ""));
+
+		if ($fstype != "iscsi")
+			exec("export LANG=C; /usr/bin/sudo /bin/umount -f /dev/" . escapeshellarg($vgname) . "/of.snapshot." . escapeshellarg($volume) . "." . escapeshellarg($snapshot), $umount_output, $umount_result);
+		exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvremove -f /dev/" . escapeshellarg($vgname) . "/of.snapshot." . escapeshellarg($volume) . "." . escapeshellarg($snapshot));
+		exec("export LANG=C; /usr/bin/sudo /bin/rmdir --ignore-fail-on-non-empty /mnt/snapshots/" . escapeshellarg($vgname) . "/" . escapeshellarg($volume) . "/" . escapeshellarg($snapshot));
+		exec("export LANG=C; /usr/bin/sudo /bin/rmdir -p --ignore-fail-on-non-empty /mnt/snapshots/" . escapeshellarg($vgname) . "/" . escapeshellarg($volume));
+
+		flock($flockp, LOCK_UN | LOCK_NB);
+		fclose($flockp);
+		header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+		exit;
+	}
+	else if ($_GET["snapaction"] == "deletesnapshotschedule")
+	{
+		$smb = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service smb status"), "running") ? 1 : 0);
+		$nfsv3 = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service nfs status"), "running") ? 1 : 0);
+		$httpd = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service httpd status"), "running") ? 1 : 0);
+		$ftp = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd status"), "running") ? 1 : 0);
+                $rsync = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service rsync status"), "running") ? 1 : 0);
+		$iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+
+		if ($smb)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service smb stop");
+		if ($nfsv3)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service nfs stop");
+		if ($httpd)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service httpd stop");
+		if ($ftp)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd stop");
+                if ($rsync)
+                        exec("export LANG=C; /usr/bin/sudo /sbin/service rsync stop");
+		if ($iscsi)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target stop");
+
+		$fstab_append = "";
+
+		for ($i = 0; $i < count($schedule_lvname); $i++)
+		{
+			if (($schedule_lvname[$i] == $volume) && ($schedule_vgname[$i] == $vgname))
+			{
+				for ($j = 0; $j < count($snapshots_id); $j++)
+				{
+					if (($snapshots_lvname[$j] == $volume) && ($snapshots_vgname[$j] == $vgname) && (substr($snapshots_id[$j], 0, 5) == "sched"))
+					{
+						if ($fstype != "iscsi")
+							exec("export LANG=C; /usr/bin/sudo /bin/umount -f /dev/" . escapeshellarg($vgname) . "/of.snapshot." . escapeshellarg($volume) . "." . escapeshellarg($snapshots_id[$j]), $umount_output, $umount_result);
+
+						if ($umount_result != 0)
+						{
+							apply_configuration(array("services" => "keep", "chmod" => "no", "chmod_path" => ""));
+
+							if ($smb)
+								exec("export LANG=C; /usr/bin/sudo /sbin/service smb restart");
+
+							if ($nfsv3)
+								exec("export LANG=C; /usr/bin/sudo /sbin/service nfs restart");
+
+							if ($http)
+								exec("export LANG=C; /usr/bin/sudo /sbin/service httpd restart");
+
+							if ($ftp)
+								exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd restart");
+
+							if ($iscsi)
+								exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target restart");
+                                                        if ($rsync)
+                                                                exec("export LANG=C; /usr/bin/sudo /sbin/service rsync restart");
+
+
+
+							flock($flockp, LOCK_UN | LOCK_NB);
+							fclose($flockp);
+							header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+							exit;
+						}
+					}
+				}
+
+				for ($j = 0; $j < count($snapshots_id); $j++)
+				{
+					if (($snapshots_lvname[$j] == $volume) && ($snapshots_vgname[$j] == $vgname) && (substr($snapshots_id[$j], 0, 5) == "sched"))
+					{
+						exec("export LANG=C; /usr/bin/sudo /bin/rmdir --ignore-fail-on-non-empty /mnt/snapshots/" . escapeshellarg($vgname) . "/" . escapeshellarg($volume) . "/" . escapeshellarg($snapshots_id[$j]));
+						exec("export LANG=C; /usr/bin/sudo /bin/rmdir -p --ignore-fail-on-non-empty /mnt/snapshots/" . escapeshellarg($vgname) . "/" . escapeshellarg($volume));
+
+						do
+						{
+							$newname = "oldsnap" . substr(sha1($snapshots_vgname[$j] . $snapshots_lvname[$j] . rand()), 0, 16);
+							$mountpath = "/mnt/snapshots/" . $vgname . "/" . $volume . "/" . $newname;
+						} while (is_dir($mountpath));
+
+						exec("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvrename /dev/" . escapeshellarg($vgname) . "/of.snapshot." . escapeshellarg($volume) . "." . escapeshellarg($snapshots_id[$j]) . " /dev/" . escapeshellarg($vgname) . "/of.snapshot." . escapeshellarg($volume) . "." . $newname);
+
+						exec("export LANG=C; /usr/bin/sudo /bin/mkdir -p " . escapeshellarg($mountpath));
+
+						$snapshots_id[$j] = $newname;
+						$snapshots_rotateid[$j] = 0;
+
+						$fs = 0;
+						$fsfound = false;
+
+						for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+						{
+							if ($fs_info[$fsi]["type"] == $fstype)
+							{
+								$fs = $fsi;
+								$fsfound = true;
+								break;
+							}
+						}
+
+						if ($fsfound == false)
+							$fs = 0;
+
+                        			if ($fstype != "iscsi")
+						    $fstab_append = $fstab_append . "/dev/" . $vgname . "/of.snapshot." . $volume . "." . $newname . " " . $mountpath . " " . $fs_info[$fs]["type"] . " " . $fs_info[$fs]["snapshot_mount_options"] . " 0 0\n";
+
+						if (($cluster_enabled) && ($fstype != "iscsi"))
+							exec("export LANG=C; /usr/bin/sudo /bin/mount -t " . $fs_info[$fs]["type"] . " -o " . $fs_info[$fs]["snapshot_mount_options"] . " /dev/" . $vgname . "/of.snapshot." . $volume . "." . $newname  . " " . escapeshellarg($mountpath));
+					}
+				}
+
+				break;
+			}
+		}
+
+		$snapshotsp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /opt/openfiler/etc/snapshots.xml", "w");
+		fputs($snapshotsp, "<?xml version=\"1.0\" ?>\n");
+		fputs($snapshotsp, "<snapshots>\n");
+
+		for ($i = 0; $i < count($snapshots_id); $i++)
+			fputs($snapshotsp, "\t<snapshot"
+				. " id=\"" . htmlentities($snapshots_id[$i])
+				. "\" lvname=\"" . htmlentities($snapshots_lvname[$i])
+				. "\" vgname=\"" . htmlentities($snapshots_vgname[$i])
+				. "\" shared=\"" . htmlentities($snapshots_shared[$i])
+				. "\" rotateid=\"" . htmlentities($snapshots_rotateid[$i])
+				. "\" timestamp=\"" . htmlentities($snapshots_timestamp[$i])
+				. "\" />\n");
+
+		for ($i = 0; $i < count($schedule_vgname); $i++)
+			if (!(($schedule_lvname[$i] == $volume) && ($schedule_vgname[$i] == $vgname)))
+				fputs($snapshotsp, "\t<schedule"
+					. " size=\"" . htmlentities($schedule_size[$i])
+					. "\" share=\"" . htmlentities($schedule_share[$i])
+					. "\" timecounter=\"" . htmlentities($schedule_timecounter[$i])
+					. "\" timemax=\"" . htmlentities($schedule_timemax[$i])
+					. "\" rotatecounter=\"" . htmlentities($schedule_rotatecounter[$i])
+					. "\" rotatemax=\"" . htmlentities($schedule_rotatemax[$i])
+					. "\" lvname=\"" . htmlentities($schedule_lvname[$i])
+					. "\" vgname=\"" . htmlentities($schedule_vgname[$i])
+					. "\" />\n");
+
+		fputs($snapshotsp, "</snapshots>\n");
+		pclose($snapshotsp);
+
+		if (!$cluster_enabled)
+		{
+			if ($fstype != "iscsi")
+			{
+				$fstabp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/fstab", "w");
+
+				for ($i = 0; $i < $fstabcount; $i++)
+				{
+					$str = "";
+
+					if (substr($fstab[$i][0], 0, strlen("/dev/" . $vgname . "/of.snapshot." . $volume . ".sched")) == "/dev/" . $vgname . "/of.snapshot." . $volume . ".sched")
+						continue;
+
+					for ($j = 0; $j < count($fstab[$i]); $j++)
+					{
+						if ($j > 0)
+							$str .= " ";
+						$str .= $fstab[$i][$j];
+					}
+
+					fputs($fstabp, ($str . "\n"));
+				}
+
+				fputs($fstabp, $fstab_append);
+
+				pclose($fstabp);
+
+				exec("export LANG=C; /usr/bin/sudo /bin/mount -a");
+			}
+		}
+		else
+		{
+			$service_winbind = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service winbind status"), "running") ? 1 : 0);
+			$service_smb = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service smb status"), "running") ? 1 : 0);
+			$service_nfsv3 = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service nfs status"), "running") ? 1 : 0);
+			$service_http = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service httpd status"), "running") ? 1 : 0);
+			$service_ftp = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd status"), "running") ? 1 : 0);
+                        $service_rsync = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service rsync status"), "running") ? 1 : 0);
+			$service_iscsi = (strstr(exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target status"), "running") ? 1 : 0);
+
+
+			$clusterp = popen("export LANG=C; /usr/bin/sudo /usr/bin/tee /etc/ha.d/haresources", "w");
+
+			$cluster_resource_str = "";
+
+			for ($i = 0; $i < count($cluster_resource); $i++)
+				$cluster_resource_str .= " " . $cluster_resource[$i];
+
+			for ($i = 0; $i < count($volumes_id); $i++)
+			{
+				$fstype = $volumes_fstype[$i];
+
+				if ($fstype != "iscsi")
+				{
+					$fs = 0;
+					$fsfound = false;
+
+					for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+					{
+						if ($fs_info[$fsi]["type"] == $fstype)
+						{
+							$fs = $fsi;
+							$fsfound = true;
+							break;
+						}
+					}
+
+					if ($fsfound == false)
+						$fs = 0;
+
+					$cluster_resource_str .= " Filesystem::/dev/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . "/mnt/" . $volumes_vg[$i] . "/" . $volumes_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["mount_options"];
+				}
+			}
+
+			for ($i = 0; $i < count($snapshots_id); $i++)
+			{
+				$fstype = "";
+
+				for ($fsj = 0; $fsj < count($volumes_id); $fsj++)
+				{
+					if (($snapshots_vgname[$i] == $volumes_vg[$fsj]) && ($snapshots_lvname[$i] == $volumes_id[$fsj]))
+					{
+						$fstype = $volumes_fstype[$fsj];
+						break;
+					}
+				}
+
+				if ($fstype != "iscsi")
+				{
+					$fs = 0;
+					$fsfound = false;
+
+					for ($fsi = 0; $fsi < count($fs_info); $fsi++)
+					{
+						if ($fs_info[$fsi]["type"] == $fstype)
+						{
+							$fs = $fsi;
+							$fsfound = true;
+							break;
+						}
+					}
+
+					if ($fsfound == false)
+						$fs = 0;
+
+					$cluster_resource_str .= " Filesystem::/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i] . "::" . "/mnt/snapshots/" . $snapshots_vgname[$i] . "/" . $snapshots_lvname[$i] . "/" . $snapshots_id[$i] . "::" . $fs_info[$fs]["type"] . "::" . $fs_info[$fs]["snapshot_mount_options"];
+				}
+			}
+
+			if ($service_winbind > 0)
+				$cluster_resource_str .= " winbind";
+			if ($service_http > 0)
+				$cluster_resource_str .= " httpd";
+			if ($service_nfsv3 > 0)
+				$cluster_resource_str .= " nfs";
+			if ($service_smb > 0)
+				$cluster_resource_str .= " smb";
+			if ($service_ftp > 0)
+				$cluster_resource_str .= " proftpd";
+                        if ($service_rsync > 0)
+                                $cluster_resource_str .= " rsync";
+			if ($service_iscsi > 0)
+				$cluster_resource_str .= " iscsi-target";
+
+			$cluster_resource_str .= " openfiler";
+
+			fputs($clusterp, $cluster_nodename . $cluster_resource_str . "\n");
+			pclose($clusterp);
+		}
+
+		apply_configuration(array("services" => "keep", "chmod" => "no", "chmod_path" => ""));
+
+		if ($smb)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service smb restart");
+
+		if ($nfsv3)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service nfs restart");
+
+		if ($http)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service httpd restart");
+
+		if ($ftp)
+			exec("export LANG=C; /usr/bin/sudo /sbin/service proftpd restart");
+                if ($rsync)
+                        exec("export LANG=C; /usr/bin/sudo /sbin/service rsync restart");
+                if ($iscsi)
+                        exec("export LANG=C; /usr/bin/sudo /sbin/service iscsi-target restart");
+
+		flock($flockp, LOCK_UN | LOCK_NB);
+		fclose($flockp);
+		header("Location: ./volumes_snapshots.html?volume=" . urlencode($volume) . "&vgname=" . urlencode($vgname));
+		exit;
+	}
+
+	if (strlen($_GET["volume"]) <= 0)
+	{
+		flock($flockp, LOCK_UN | LOCK_NB);
+		fclose($flockp);
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+	$volume = strtolower($volume);
+
+	$vn = 0;
+	while (($vn < count($volumes_id)) && ($volumes_id[$vn] != $volume))
+		$vn++;
+
+	if ($vn >= count($volumes_id))
+	{
+		flock($flockp, LOCK_UN | LOCK_NB);
+		fclose($flockp);
+		header("Location: ./volumes.html");
+		exit;
+	}
+
+	generic_header(array("title" => _("Volumes : Manage Volumes : Snapshots")));
+	single_begin(array());
+
+?>
+
+<script src="utility.js" type="text/javascript" language="JavaScript">
+</script>
+<script src="popup.js" type="text/javascript" language="JavaScript">
+</script>
+
+<p>&nbsp;</p>
+
+<?php
+        nested_tab_begin("C_VOLUME_EXISTING");
+	print("<h3 align=\"center\">List of existing snapshots for volume \"" . $volume . "\" in volume group \"" . $vgname . "\"</h3>\n");
+
+	$snapshots_found = false;
+	for ($i = 0; $i < count($snapshots_lvname); $i++)
+		if (($snapshots_lvname[$i] == $volume) && ($snapshots_vgname[$i] == $vgname))
+		{
+			$snapshots_found = true;
+			break;
+		}
+
+	if ($snapshots_found)
+	{
+		print("<form name=\"takesnapshotform\" method=\"post\" action=\"volumes_snapshots.html\">\n");
+		print("<input type=\"hidden\" name=\"volume\" value=\"" . $volume . "\" />\n");
+		print("<input type=\"hidden\" name=\"vgname\" value=\"" . $vgname . "\" />\n");
+		print("<input type=\"hidden\" name=\"snapaction\" value=\"changesize\" />\n");
+		print("<div align=\"center\">\n");
+		print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+		print("<tr>\n");
+		print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"left\" valign=\"middle\"><strong>Snapshot name</strong></td>\n");
+		print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Date/time taken</strong></td>\n");
+		print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Block utilization (in MB)</strong></td>\n");
+		print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Snapshot size (in MB)</strong></td>\n");
+		print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Share contents</strong></td>\n");
+		print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Save</strong></td>\n");
+		print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Delete snapshot</strong></td>\n");
+		print("</tr>\n");
+
+		$dcolor = 0;
+
+		for ($i = 0; $i < count($snapshots_lvname); $i++)
+			if (($snapshots_lvname[$i] == $volume) && ($snapshots_vgname[$i] == $vgname))
+			{
+				if ($GLOBALS["lvm_version"] == 1)
+					$snapshot_dev = "/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i];
+				else
+					$snapshot_dev = "/dev/mapper/" . $snapshots_vgname[$i] . "-of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i];
+
+				$snapshot_symlink_dev = "/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i];
+
+				if (!file_exists($snapshot_dev))
+					continue;
+
+				if ($dcolor == 0)
+				{
+					$dcolor = 1;
+					$dvalue = $GLOBALS["color_table_row1"];
+				}
+				else
+				{
+					$dcolor = 0;
+					$dvalue = $GLOBALS["color_table_row2"];
+				}
+
+				$lvp = popen("export LANG=C; /usr/bin/sudo " . $GLOBALS["lvm_command_prefix"] . "lvdisplay -c " . $snapshot_symlink_dev, "r");
+				$j = 0;
+				while (!feof($lvp))
+					$lvs[$j++] = fgets($lvp, 4096);
+				pclose($lvp);
+
+				$snapshot_info = explode(":", trim($lvs[0], " "));
+
+				$rand_id = sha1($snapshots_id[$i] . rand());
+
+				$scheduled = 0;
+
+				if (substr($snapshots_id[$i], 0, 5) == "sched")
+				{
+					$dvalue = "#dddddd";
+					$scheduled = 1;
+				}
+
+				print("<tr>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"left\" valign=\"middle\">" . htmlentities($snapshots_id[$i]) . "</td>\n");
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">" . htmlentities(date("F j, Y H:i:s", strtotime($snapshots_timestamp[$i]))) . "</td>\n");
+				if (intval($snapshot_info[13]) >= intval($snapshot_info[6]))
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\"><strong><span style=\"color: red; background-color: transparent;\">Snapshot full. Please delete.</span></strong></td>\n");
+				else
+					print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">" . intval(round($snapshot_info[13] / 2048.0)) . "</td>\n");
+
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">");
+				if ($scheduled)
+					print(intval(round($snapshot_info[6] / 2048.0)));
+				else
+					print("<input style=\"text-align: right;\" type=\"text\" size=\"10\" name=\"newsize-" . $vgname . "-" . $volume . "-" . $snapshots_id[$i] . "\" value=\"" . (intval(round($snapshot_info[6] / 2048.0))) . "\" />");
+				print("</td>\n");
+
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\">");
+				if ($scheduled)
+					print(($snapshots_shared[$i] == "yes") ? "Yes, do" : "No, don't");
+				else
+					print("<select name=\"snapshare-" . $vgname . "-" . $volume . "-" . $snapshots_id[$i] . "\"><option value=\"no\"" . (($snapshots_shared[$i] == "yes") ? "" : " selected=\"selected\"") . ">No, don't</option><option value=\"yes\"" . (($snapshots_shared[$i] != "yes") ? "" : " selected=\"selected\"") . ">Yes, do</option></select>");
+				print("</td>\n");
+
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">");
+				if ($scheduled)
+					print("N/A");
+				else
+					print("<input type=\"submit\" name=\"changesize-" . $vgname . "-" . $volume . "-" . $snapshots_id[$i] . "\" value=\"Save\" />");
+				print("</td>\n");
+
+				print("<td bgcolor=\"" . $dvalue . "\" align=\"center\" valign=\"middle\">\n");
+				if ($scheduled)
+					print("N/A");
+				else
+				{
+
+					$targetIqn = array();
+					if ($ietObj != NULL) {
+						$lunPath = "/dev/" . $snapshots_vgname[$i] . "/of.snapshot." . $snapshots_lvname[$i] . "." . $snapshots_id[$i] ;
+						$targetIqn = $ietObj->getLunUsage($lunPath);
+					}
+
+					if (count($targetIqn) > 0)
+						print("<em>In use</em>\n");
+					else {
+						print("<div id=\"popup-" . $rand_id . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"sharespopup\">\n");
+						print("<p align=\"center\"><strong>Are you sure you want to delete<br />the snapshot named \"" . htmlentities($snapshots_id[$i]) . "\"?</strong></p>\n");
+						print("<p align=\"center\">[&nbsp;<a href=\"volumes_snapshots.html?snapaction=deletesnapshot&amp;volume=" . urlencode($volume) . "&amp;vgname=" . urlencode($vgname) . "&amp;snapshot=" . urlencode($snapshots_id[$i]) . "\">Yes</a> / <a href=\"#\" onclick=\"hideCurrentPopup(); return false;\">NO DON'T DELETE</a>&nbsp;]</p>\n");
+						print("</div>\n");
+						print("<a href=\"#\" onclick=\"return !showPopup('popup-" . $rand_id . "', event);\">Delete</a>\n");
+					}
+				}
+				print("</td>\n");
+
+				print("</tr>\n");
+			}
+
+		print("</table>\n");
+		print("</div>\n");
+		print("</form>\n");
+	}
+	else
+	{
+		printMessageBlock("warning","<p align=\"center\"><em>No snapshots were found. You may create a snapshot schedule in the form below.
+                                  Alternatively, you may create an ad-hoc / instant snapshot.</em></p>\n");
+	}
+?>
+	<p>&nbsp;</p>
+
+	<hr />
+
+<?php
+        $lvmObj = new LVM();
+        $VFreeArr = $lvmObj->getVGMetadata($vgname);
+        $VFree = $VFreeArr["vg_free"];
+
+
+
+	print("<h3 align=\"center\">Schedule snapshots for volume \"" . $volume . "\" in volume group \"" . $vgname . "\"</h3>\n");
+
+        if (intval($VFree) != 0) {
+
+
+            $schedule_found = false;
+
+            for ($i = 0; $i < count($schedule_lvname); $i++)
+            {
+                    if (($schedule_lvname[$i] == $volume) && ($schedule_vgname[$i] == $vgname))
+                    {
+                            $schedule_found = true;
+                            $schedule_index = $i;
+                            break;
+                    }
+            }
+
+            if ($schedule_found == true)
+            {
+                    print("<div id=\"popup-schedule-" . $rand_id . "\" onclick=\"event.cancelBubble = true;\" onmousedown=\"dragpopup(this, event)\" class=\"sharespopup\">\n");
+                    print("<p align=\"center\"><strong>Are you sure you want to delete<br />the schedule for this volume?</strong></p>\n");
+                    print("<p align=\"center\">[&nbsp;<a href=\"volumes_snapshots.html?snapaction=deletesnapshotschedule&amp;volume=" . urlencode($volume) . "&amp;vgname=" . urlencode($vgname) . "\">Yes</a> / <a href=\"#\" onclick=\"hideCurrentPopup(); return false;\">NO DON'T DELETE</a>&nbsp;]</p>\n");
+                    print("</div>\n");
+                    print("<p>The following schedule exists for this volume. <a href=\"#\" onclick=\"return !showPopup('popup-schedule-" . $rand_id . "', event);\">Click here</a> to delete the schedule.</p>");
+
+                    print("<div align=\"center\">\n");
+                    print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+                    print("<tr>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Size in MB</strong></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Share contents?</strong></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Interval in hours</strong></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Rotate count</strong></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Next snapshot in...</strong></td>\n");
+                    print("</tr>\n");
+                    print("<tr>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\">" . $schedule_size[$schedule_index] . "</td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\">" . (($schedule_share[$schedule_index] == "yes") ? "Yes, do" : "No, don't") . "</td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\">" . $schedule_timemax[$schedule_index] . "</td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\">" . $schedule_rotatemax[$schedule_index] . "</td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\">" . $schedule_timecounter[$schedule_index] . " hours</td>\n");
+                    print("</tr>\n");
+                    print("</table>\n");
+                    print("</div>\n");
+            }
+            else
+            {
+
+
+                    printMessageBlock("info","Scheduled snapshots are taken continuously with a time interval between sequential snapshots.
+                                      The time interval can be specified in hours below. The Rotate count field indicates how many
+                                      snapshots should be kept in rotation. After this count of snapshots are taken by the scheduler,
+                                      the oldest one is deleted when a newer snapshot is to be taken.");
+
+
+                    print("<form name=\"schedulesnapshotform\" method=\"post\" action=\"volumes_snapshots.html\">\n");
+                    print("<input type=\"hidden\" name=\"volume\" value=\"" . $volume . "\" />\n");
+                    print("<input type=\"hidden\" name=\"vgname\" value=\"" . $vgname . "\" />\n");
+                    print("<input type=\"hidden\" name=\"snapaction\" value=\"schedulesnapshot\" />\n");
+
+                    print("<div align=\"center\">\n");
+                    print("<table cellpadding=\"8\" cellspacing=\"2\" border=\"0\">\n");
+                    print("<tr>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Size in MB</strong></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Share contents?</strong></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Interval in hours</strong></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Rotate count</strong></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_heading"] . "\" align=\"center\" valign=\"middle\"><strong>Apply</strong></td>\n");
+                    print("</tr>\n");
+                    print("<tr>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\"><input type=\"text\" name=\"snapsize\" style=\"text-align: right;\" size=\"10\" /></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\"><select name=\"snapshare\"><option value=\"no\">No, don't</option><option value=\"yes\">Yes, do</option></select></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\"><input type=\"text\" name=\"snapinterval\" style=\"text-align: right;\" size=\"10\" value=\"24\" /></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\"><input type=\"text\" name=\"snaprotatecount\" style=\"text-align: right;\" size=\"10\" value=\"6\" /></td>\n");
+                    print("<td bgcolor=\"" . $GLOBALS["color_table_row1"] . "\" align=\"center\"><input type=\"submit\" title=\"Schedule snapshots\" name=\"schedulesnapbutton\" value=\"Schedule\" size=\"10\" /></td>\n");
+                    print("</tr>\n");
+                    print("</table>\n");
+                    print("</div>\n");
+
+                    print("</form>\n");
+            }
+
+        }
+
+        else
+            printMessageBlock("warning", "There are no free extents in this volume group. You cannot create a snapshot schedule until the volume group is extended
+                              or some volumes are deleted from this volume group to free up some space.");
+
+
+?>
+
+	<p>&nbsp;</p>
+
+	<hr />
+
+	<h3 align="center">Take a snapshot</h3>
+<?php
+
+
+        if (intval($VFree) != 0) {
+
+            print("<form name=\"takesnapshotform\" method=\"post\" action=\"volumes_snapshots.html\">\n");
+            print("<input type=\"hidden\" name=\"volume\" value=\"" . $volume . "\" />\n");
+            print("<input type=\"hidden\" name=\"vgname\" value=\"" . $vgname . "\" />\n");
+            print("<input type=\"hidden\" name=\"snapaction\" value=\"takesnapshot\" />\n");
+
+            printMessageBlock("info", "<p>Snapshots work using the copy-on-write method.
+            Use the following form to take a snapshot of the supplied size
+            for the volume. Once the amount of updates to the volume since the snapshot was
+            taken crosses the size of the snapshot, the volume will become read-only until
+            more space is allocated to the snapshot. So please allocate enough space to it.
+            The snapshot name must be specified like a UNIX filename without its path.</p>");
+?>
+            <div align="center">
+            <table cellpadding="8" cellspacing="2" border="0">
+            <tr>
+                    <td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>"><strong>Snapshot name</strong></td>
+                    <td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Size in MB</strong></td>
+                    <td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Share contents?</strong></td>
+                    <td bgcolor="<?php print($GLOBALS["color_table_heading"]); ?>" align="center"><strong>Apply</strong></td>
+            </tr>
+            <tr>
+                    <td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="text" name="snapname" size="20" /></td>
+                    <td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="text" name="snapsize" style="text-align: right;" size="10" /></td>
+                    <td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><select name="snapshare"><option value="no">No, don't</option><option value="yes">Yes, do</option></select></td>
+                    <td bgcolor="<?php print($GLOBALS["color_table_row1"]); ?>" align="center"><input type="submit" title="Take snapshot" name="takesnapbutton" value="Take snapshot" size="10" /></td>
+            </tr>
+            </table>
+            </div>
+
+<?php
+            print("</form>\n");
+
+        }
+
+        else
+            printMessageBlock("warning", "There are no free extents in this volume group. You cannot create a snapshot until the volume group is extended
+                              or some volumes are deleted from this volume group to free up some space.");
+
+
+	print("<p>&nbsp;</p>\n");
+
+	nested_tab_end();
+
+	single_end(array());
+	generic_footer(array());
+
+	flock($flockp, LOCK_UN | LOCK_NB);
+	fclose($flockp);
+?>
