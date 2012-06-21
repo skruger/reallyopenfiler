@@ -1,0 +1,7 @@
+ReallyOpenFiler
+===============
+
+This is an attempt to take the source code from OpenFiler and run it
+on alternate linux distributions.
+
+Initial attempts will focus on RHEL6/Centos6/Scientific 6.
