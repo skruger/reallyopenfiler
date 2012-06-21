@@ -1147,7 +1147,6 @@ function apply_configuration($params = array()) {
 		
 
 							$ac_smb_fp->AddLine("	csc policy = $ac_smb_csc_policy"); 
-							$ac_smb_fp->AddLine("	share modes = yes");
 							$ac_smb_fp->AddLine("	veto oplock files = /*.mdb/*.MDB/*.dbf/*.DBF/");
 							$ac_smb_fp->AddLine("	veto files = /*:Zone.Identifier:*/");
 							$ac_smb_fp->AddLine("	create mode = 0770");
@@ -1564,7 +1563,6 @@ function apply_configuration($params = array()) {
 								$ac_smb_fp->AddLine("   browseable = yes"); 
 		
 							$ac_smb_fp->AddLine("   csc policy = $ac_smb_csc_policy"); 
-							$ac_smb_fp->AddLine("   share modes = yes");
 							$ac_smb_fp->AddLine("   veto oplock files = /*.mdb/*.MDB/*.dbf/*.DBF/");
 							$ac_smb_fp->AddLine("   veto files = /*:Zone.Identifier:*/");
 							$ac_smb_fp->AddLine("   store dos attributes = " . $ac_smbstoredosattributes); // NOTE: fix for #682
@@ -1887,7 +1885,7 @@ function apply_configuration($params = array()) {
 		
 		$ac_smb_fp->AddLine( "idmap uid = " . $authcfg_obj->get_idmap_uid());
 		$ac_smb_fp->AddLine( "idmap gid = " . $authcfg_obj->get_idmap_gid());
-		$ac_smb_fp->AddLine( "winbind cache time = 15");
+		$ac_smb_fp->AddLine( "winbind cache time = 3600");
 		$ac_smb_fp->AddLine( "winbind enum users = yes");
 		$ac_smb_fp->AddLine( "winbind enum groups = yes");
 

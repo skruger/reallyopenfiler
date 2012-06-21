@@ -38,6 +38,9 @@
     $C_VOLUME_ISCSI_TARGETS = array("li_class"=>"volumes_iscsi","title"=>"iSCSI Targets", "url"=>"/admin/volumes_iscsi_targets.html");
     $C_VOLUME_RAID_MANAGE = array("li_class"=>"volumes_raid","title"=>"Software RAID","url"=>"/admin/volumes_raidmanage.html");
     $C_VOLUME_EXISTING = array("li_class"=>"volumes_logical","title"=>"Manage Volumes","url"=>"/admin/volumes.html");
+    $C_VOLUME_FC_TARGETS =  array("li_class"=>"volumes_iscsi","title"=>"FC Targets", "url"=>"/admin/volumes_fc_targets.html");
+    $C_VOLUME_ADVANCED_ISCSI = array("li_class"=>"volumes_iscsi","title"=>"Advanced iSCSI", "url"=>"/admin/volumes_advanced_iscsi.html");
+    
 
 
     $C_ACCOUNTS = array("li_class"=>"accounts_accounts","title"=>"Authentication", "url"=>"/admin/");
@@ -121,6 +124,8 @@
                                 "C_VOLUME_PHYSICAL_MANAGEMENT"=>$C_VOLUME_PHYSICAL_MANAGEMENT, 
                                 "C_VOLUME_CREATE"=>$C_VOLUME_CREATE,
                                 "C_VOLUME_ISCSI_TARGETS"=>$C_VOLUME_ISCSI_TARGETS,
+                                "C_VOLUME_FC_TARGETS"=>$C_VOLUME_FC_TARGETS,
+                                "C_VOLUME_ADVANCED_ISCSI"=>$C_VOLUME_ADVANCED_ISCSI,
                                 "C_VOLUME_RAID_MANAGE"=>$C_VOLUME_RAID_MANAGE);
 
 

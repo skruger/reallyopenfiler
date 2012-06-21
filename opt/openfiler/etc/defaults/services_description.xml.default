@@ -3,19 +3,6 @@
 <services>
 
 
-     <service name="qla2x00tgt">
-        <function name="start"/>
-        <function name="stop"/>
-        <function name="status"/>
-        <function name="try-restart"/>
-        <function name="restart"/>
-        <function name="reload"/>
-	<function name="force-reload"/>
-        <daemon name="qla2x00tgt"/>
-	<meta name="desc">FC Target</meta>
-        <pidfile path=""/>
-    </service>
-
      <service name="scst">
         <function name="start"/>
         <function name="stop"/>
@@ -25,7 +12,7 @@
         <function name="reload"/>
         <function name="force-reload"/>
         <daemon name="scst"/>
-        <meta name="desc">SCST Target</meta>
+        <meta name="desc">SCST Target (FC)</meta>
         <pidfile path=""/>
     </service>
 

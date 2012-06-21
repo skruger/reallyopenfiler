@@ -64,7 +64,7 @@ class ServiceManager {
         
 	$servicelist = array("smb","nfs","rsync","httpd","ldap",
                         "proftpd","iscsi-target","upsd",
-                        "upsmon", "open-iscsi","acpid","scst","qla2x00tgt","corosync");
+                        "upsmon", "open-iscsi","acpid","scst","corosync");
         $handle = opendir("/etc/init.d/"); 
         while (false !== ($file = readdir($handle))) {
 	

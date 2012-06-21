@@ -275,7 +275,7 @@ class Authconfig {
 	public function enableHesiod($hesiodlhs, $hesiodrhs) {
 		
 		$cmd_args = " --update --enablehesiod --hesiodlhs=" . escapeshellarg($hesiodlhs) . " --hesiodrhs=" . escapeshellarg($hesiodrhs); 
-		$ret = PsExecture(CMD_AUTHCONFIG . "$cmd_args"); 
+		$ret = PsExecute(CMD_AUTHCONFIG . "$cmd_args"); 
 		return $ret; 
 	}
 

@@ -46,17 +46,14 @@ class SCSTFC {
 	private $domdoc;
 	private $xpath;
 	private $service_scst_status;
-	private $service_qla_status;
 	public $isRunning;
 	private static $configXMLDom;
 	
 	public function SCSTFC() {
 		$sm = new ServiceManager(); 
 	        $service_scst = $sm->getService("scst");
-		$service_qla = $sm->getService("qla2x00tgt");
 		$this->service_scst_status = $service_scst->getStatus();
-		$this->service_qla_status = $service_qla->getStatus(); 
-		if ($this->service_scst_status  === STATE_RUNNING && $this->service_qla_status === STATE_RUNNING) {
+		if ($this->service_scst_status  === STATE_RUNNING) {
 			$this->isRunning = TRUE;
 			$this->reset();	
 		}

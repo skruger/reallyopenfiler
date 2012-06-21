@@ -199,7 +199,7 @@
 
             if (strstr($ptresult[0], "unrecognised disk label"))
             {
-                    exec("export LANG=C; /usr/bin/sudo /usr/sbin/parted " . escapeshellarg($dev) . " mklabel gpt");
+                    exec("export LANG=C; /usr/bin/sudo /usr/sbin/parted -s " . escapeshellarg($dev) . " mklabel gpt");
                    // exec("export LANG=C; /usr/bin/sudo /usr/sbin/partprobe 2>&1");
             }
 

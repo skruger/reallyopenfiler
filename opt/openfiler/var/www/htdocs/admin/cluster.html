@@ -62,6 +62,12 @@
 <script src="popup.js" type="text/javascript" language="JavaScript">
 </script>
 
+<?php 
+
+if (!is_file("/opt/openfiler/etc/plugins/cluster/cluster.php")) {
+
+?>
+
 <script language="JavaScript" type="text/javascript">
 <!--
 
@@ -119,16 +125,24 @@ function readCookie(name) {
     }
 
     showTab(defaultTab);
-}
+
 
 
 
 // -->
 </script>
 
+<?php
+
+}
+
+?>
 
 <?php
         nested_tab_begin("C_CLUSTER");
+
+	if (!is_file("/opt/openfiler/etc/plugins/cluster/cluster.php")) {
+
 ?>
 
 <table cellpadding="0" cellspacing="0" border="0" style="width: 95%;"><tr>
@@ -143,10 +157,11 @@ function readCookie(name) {
 
 	print("<div style=\" padding: 2em;\" id=\"clusterstatuscontainer\">\n");
 	$dvalue = $GLOBALS["color_table_row1"];
-	?>
-	<h3>Cluster Status</h3>
-	<?php
+        
+
+	print("<h3>Cluster Status</h3>");
 	$clustat = new ClusterManager();
+	
 	if ($clustat->isRunning) 
 		echo $clustat->printStatus();
 	else {
@@ -162,6 +177,13 @@ function readCookie(name) {
 
 	}
 	print("</div>");
+
+	}
+
+	else {
+
+		include("/opt/openfiler/etc/plugins/cluster/cluster.php");
+	}
 	nested_tab_end();
 
 	single_end(array());
